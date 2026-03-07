@@ -41,6 +41,8 @@ while the long-running task continues inside a Vercel Sandbox.
 ## Built-In Templates
 
 - `standard`
+- `claude-code`
+- `codex`
 - `shell-scripts-validation`
 - `webpage-inspector`
 
@@ -109,6 +111,6 @@ Middleware side:
 
 Current intentional deferrals:
 
-- more built-in templates beyond the three live ones
+- more built-in templates beyond the five live ones
 - the GitHub auth callback `url.parse()` deprecation warning, which currently
   appears to be upstream behavior in the Next/Auth stack

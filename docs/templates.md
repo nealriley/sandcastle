@@ -4,8 +4,10 @@ This document explains how Sandcastle templates work in the live product.
 
 ## What A Template Is
 
-In Sandcastle, a template is an application-level definition in
-`projects/ai-coding-agent/middleware/lib/templates.ts`. It is not a
+In Sandcastle, a template is an application-level definition exposed through
+the internal template service. The current built-in system templates still
+originate in `projects/ai-coding-agent/middleware/lib/templates.ts`, but the
+website and SHGO consume them through the template-service layer. It is not a
 Vercel-native "template" resource.
 
 Each template definition includes:
@@ -207,6 +209,61 @@ This is implemented in
 
 ## Built-In Templates
 
+### Provider Templates: `claude-code` and `codex`
+
+Sandcastle now has two provider-oriented templates that share one bootstrap
+core:
+
+- `claude-code`
+- `codex`
+
+They both write the same canonical artifact set into:
+
+- `/vercel/sandbox/sandcastle-template/README.md`
+- `/vercel/sandbox/sandcastle-template/CONTRACT.md`
+- `/vercel/sandbox/sandcastle-template/env-keys.txt`
+- `/vercel/sandbox/sandcastle-template/request.example.json`
+- `/vercel/sandbox/sandcastle-template/result.example.json`
+- `/vercel/sandbox/sandcastle-template/request.json`
+- `/vercel/sandbox/sandcastle-template/result.json`
+- `/vercel/sandbox/sandcastle-template/result.md`
+- `/vercel/sandbox/sandcastle-template/template-contract.mjs`
+- `/vercel/sandbox/sandcastle-template/show-contract.sh`
+
+### Structured request block
+
+Advanced callers may embed a structured request block directly inside the user
+prompt:
+
+````text
+```sandcastle-request
+{
+  "template": "codex",
+  "version": 1,
+  "mode": "task",
+  "prompt": "Describe the work to perform",
+  "inputs": {},
+  "constraints": [],
+  "artifactsRequested": ["result.json", "result.md"]
+}
+```
+````
+
+This does **not** change the public Sandcastle API shape. Sandcastle still
+returns the normal task/status payloads. The structured contract lives inside
+the sandbox through `request.json`, `result.json`, and `result.md`.
+
+### Shared helper files
+
+- `template-contract.mjs`
+  exports helper functions for:
+  - extracting a `sandcastle-request` block
+  - building request envelopes
+  - building result envelopes
+  - writing JSON files cleanly
+- `show-contract.sh`
+  prints the README, contract, request example, and result example
+
 ## `standard`
 
 Purpose:
@@ -221,6 +278,71 @@ Behavior:
 - no bootstrap files
 - no template-specific helper scripts
 - first Claude prompt is just the user prompt trimmed
+
+## `claude-code`
+
+Purpose:
+
+- clean human-first coding work
+- pragmatic implementation and debugging
+- stable request/result artifacts without heavy ceremony
+
+Behavior:
+
+- writes the shared provider-template contract files
+- supports the `sandcastle-request` prompt block when present
+- if no structured block is present, Claude is instructed to synthesize a
+  simple `request.json`
+- expects Claude to keep `result.json` and `result.md` aligned with the final
+  response
+
+First-task prompt behavior:
+
+- tells Claude this is the Sandcastle Claude Code template
+- points Claude at `show-contract.sh`, `template-contract.mjs`, `request.json`,
+  `result.json`, and `result.md`
+- tells Claude to treat a `sandcastle-request` block as the source of truth
+- tells Claude to keep the final response concise and aligned with
+  `result.json.summary`
+
+Runtime profile:
+
+- snapshot-backed when `BASE_SNAPSHOT_ID` is available
+- supports `node24` and `node22`
+- uses the standard coding preview ports
+
+## `codex`
+
+Purpose:
+
+- integration-first coding work
+- machine-readable request/result exchange
+- deterministic artifact paths for upstream systems
+
+Behavior:
+
+- writes the shared provider-template contract files
+- always expects `request.json`, `result.json`, and `result.md` to be the
+  stable artifacts for the task
+- if a `sandcastle-request` block is absent, Claude is instructed to synthesize
+  `request.json` from the plain prompt before doing other work
+
+First-task prompt behavior:
+
+- tells Claude this is the Sandcastle Codex template
+- explicitly requires a stricter workflow around `request.json` and
+  `result.json`
+- tells Claude to inspect the prompt for a `sandcastle-request` block first
+- tells Claude to use `template-contract.mjs` whenever helpful to keep the
+  envelopes valid
+- tells Claude to keep the final response tightly aligned with
+  `result.json.summary`
+
+Runtime profile:
+
+- snapshot-backed when `BASE_SNAPSHOT_ID` is available
+- supports `node24` and `node22`
+- uses the standard coding preview ports
 
 ## `shell-scripts-validation`
 

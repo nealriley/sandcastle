@@ -1,6 +1,20 @@
 import { Sandbox } from "@vercel/sandbox";
 import ms from "ms";
 import {
+  buildProviderEnvironmentManifest,
+  buildProviderTemplateContract,
+  buildProviderTemplateContractLibrary,
+  buildProviderTemplateReadme,
+  buildProviderTemplateRequestExample,
+  buildProviderTemplateRequestPlaceholder,
+  buildProviderTemplateResultExample,
+  buildProviderTemplateResultMarkdown,
+  buildProviderTemplateResultPlaceholder,
+  buildProviderTemplateShowContractScript,
+  PROVIDER_TEMPLATE_DIR,
+  type ProviderTemplateKind,
+} from "./template-assets/provider-templates";
+import {
   buildWebpageInspectorCli,
   buildWebpageInspectorLibrary,
   buildWebpageInspectorPlaceholderReport,
@@ -96,6 +110,144 @@ function buildValidationManifest(environment: Record<string, string>): string {
 
 function buildEnvironmentManifest(environment: Record<string, string>): string {
   return buildValidationManifest(environment);
+}
+
+async function bootstrapProviderTemplate(
+  provider: ProviderTemplateKind,
+  sandbox: Sandbox,
+  context: {
+    runtime: RuntimeName;
+    environment: Record<string, string>;
+  }
+): Promise<void> {
+  const manifest = buildProviderEnvironmentManifest(context.environment);
+  await sandbox.writeFiles([
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/README.md`,
+      content: Buffer.from(buildProviderTemplateReadme(provider)),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/CONTRACT.md`,
+      content: Buffer.from(buildProviderTemplateContract(provider)),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/env-keys.txt`,
+      content: Buffer.from(manifest),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/request.example.json`,
+      content: Buffer.from(buildProviderTemplateRequestExample(provider)),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/result.example.json`,
+      content: Buffer.from(buildProviderTemplateResultExample(provider)),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/request.json`,
+      content: Buffer.from(buildProviderTemplateRequestPlaceholder(provider)),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/result.json`,
+      content: Buffer.from(buildProviderTemplateResultPlaceholder(provider)),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/result.md`,
+      content: Buffer.from(buildProviderTemplateResultMarkdown(provider)),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/template-contract.mjs`,
+      content: Buffer.from(buildProviderTemplateContractLibrary()),
+    },
+    {
+      path: `${PROVIDER_TEMPLATE_DIR}/show-contract.sh`,
+      content: Buffer.from(buildProviderTemplateShowContractScript()),
+    },
+  ]);
+
+  const chmodResult = await sandbox.runCommand({
+    cmd: "bash",
+    args: ["-lc", `chmod +x ${PROVIDER_TEMPLATE_DIR}/show-contract.sh`],
+  });
+
+  if (chmodResult.exitCode !== 0) {
+    throw new Error(`Failed to finalize ${provider} template scripts.`);
+  }
+}
+
+function buildProviderTemplatePrompt(
+  provider: ProviderTemplateKind,
+  args: {
+    prompt: string;
+    environment: Record<string, string>;
+  }
+): string {
+  const envKeys = Object.keys(args.environment).sort();
+  const displayName = provider === "claude-code" ? "Claude Code" : "Codex";
+  const userPrompt = args.prompt.trim();
+
+  const sharedLines = [
+    `This sandbox was created from the Sandcastle ${displayName} template.`,
+    `Canonical template files live in ${PROVIDER_TEMPLATE_DIR}.`,
+    "",
+    "Available helpers:",
+    "- ./sandcastle-template/show-contract.sh",
+    "- ./sandcastle-template/template-contract.mjs",
+    "- ./sandcastle-template/request.json",
+    "- ./sandcastle-template/result.json",
+    "- ./sandcastle-template/result.md",
+    "",
+    "The template supports an optional fenced structured request block in the user prompt:",
+    "```sandcastle-request",
+    "{ ...json... }",
+    "```",
+    "",
+    envKeys.length > 0
+      ? `Launch environment variables available to the sandbox: ${envKeys.join(", ")}. Never print secret values directly.`
+      : "No launch environment variables were configured for this sandbox.",
+    "",
+  ];
+
+  const workflowLines =
+    provider === "claude-code"
+      ? [
+          "Use this template like a clean, human-first coding assistant with light structured artifacts.",
+          "",
+          "Required workflow:",
+          "1. If the user prompt contains a ```sandcastle-request JSON block, treat it as the source of truth and mirror it into request.json.",
+          "2. If there is no structured block, synthesize a simple request.json envelope from the current task.",
+          "3. Inspect the workspace, perform the coding work, and keep the approach pragmatic.",
+          "4. Before finishing, update result.json and result.md so result.json.summary matches your final response.",
+          "5. Keep the final response concise, clear, and aligned with the structured artifacts.",
+        ]
+      : [
+          "Use this template like an integration-first coding agent with a stable request/result contract.",
+          "",
+          "Required workflow:",
+          "1. Inspect the user prompt for a ```sandcastle-request JSON block first.",
+          "2. If the block exists, parse it and use it as the source of truth.",
+          "3. If it does not exist, synthesize request.json from the plain-language prompt before doing any other work.",
+          "4. Keep request.json, result.json, and result.md updated in stable locations throughout the task.",
+          "5. Use template-contract.mjs whenever helpful to keep envelopes valid and machine-readable.",
+          "6. Finalize result.json and result.md before your last response, and keep the final response tightly aligned with result.json.summary.",
+        ];
+
+  return [...sharedLines, ...workflowLines, "", `User request: ${userPrompt}`].join(
+    "\n"
+  );
+}
+
+function buildClaudeCodePrompt(args: {
+  prompt: string;
+  environment: Record<string, string>;
+}): string {
+  return buildProviderTemplatePrompt("claude-code", args);
+}
+
+function buildCodexPrompt(args: {
+  prompt: string;
+  environment: Record<string, string>;
+}): string {
+  return buildProviderTemplatePrompt("codex", args);
 }
 
 function buildValidationReadme(): string {
@@ -461,6 +613,62 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
     envHints: [],
     bootstrap: noOpBootstrap,
     buildInitialPrompt: ({ prompt }) => prompt.trim(),
+  },
+  {
+    slug: "claude-code",
+    name: "Claude Code",
+    status: "live",
+    summary:
+      "A clean, human-first coding template with stable request/result artifacts for Sandcastle tasks.",
+    purpose:
+      "General coding, app work, debugging, refactors, and collaborative tasks where the user wants Claude Code-style behavior with light structure.",
+    source: {
+      kind: "snapshot",
+      snapshotEnvVar: "BASE_SNAPSHOT_ID",
+      snapshotRuntime: "node24",
+    },
+    defaultRuntime: "node24",
+    supportedRuntimes: ["node24", "node22"],
+    launchLabel: "Launch Claude Code",
+    ports: DEFAULT_TEMPLATE_PORTS,
+    timeoutMs: ms("30m"),
+    vcpus: 4,
+    promptPlaceholder:
+      "Describe the coding work to perform. You may optionally include a ```sandcastle-request JSON block for structured inputs.",
+    defaultPrompt:
+      "Inspect the workspace, carry out the requested coding task, and keep request/result artifacts up to date.",
+    envHints: [],
+    bootstrap: async (sandbox, context) =>
+      bootstrapProviderTemplate("claude-code", sandbox, context),
+    buildInitialPrompt: buildClaudeCodePrompt,
+  },
+  {
+    slug: "codex",
+    name: "Codex",
+    status: "live",
+    summary:
+      "An integration-first coding template with a stricter structured request/result contract and stable artifact paths.",
+    purpose:
+      "Machine-assisted workflows, structured task exchange, and integrations that need deterministic request/result files without changing the Sandcastle API.",
+    source: {
+      kind: "snapshot",
+      snapshotEnvVar: "BASE_SNAPSHOT_ID",
+      snapshotRuntime: "node24",
+    },
+    defaultRuntime: "node24",
+    supportedRuntimes: ["node24", "node22"],
+    launchLabel: "Launch Codex",
+    ports: DEFAULT_TEMPLATE_PORTS,
+    timeoutMs: ms("30m"),
+    vcpus: 4,
+    promptPlaceholder:
+      "Describe the coding work to perform. For advanced integrations, include a ```sandcastle-request JSON block.",
+    defaultPrompt:
+      "Materialize the structured request, carry out the requested work, and write deterministic result artifacts before finishing.",
+    envHints: [],
+    bootstrap: async (sandbox, context) =>
+      bootstrapProviderTemplate("codex", sandbox, context),
+    buildInitialPrompt: buildCodexPrompt,
   },
   {
     slug: "shell-scripts-validation",

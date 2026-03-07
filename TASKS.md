@@ -257,6 +257,8 @@ Sandcastle uses during sandbox creation.
   into declarative specs plus assets.
 - Existing built-ins must continue to work during migration:
   - `standard`
+  - `claude-code`
+  - `codex`
   - `shell-scripts-validation`
   - `webpage-inspector`
 - Sandcastle should have a fallback strategy if the Template Service layer is
@@ -313,6 +315,8 @@ Sandcastle uses during sandbox creation.
 ## Phase 4: Built-in Template Migration
 
 - [x] Expose `standard` through the new template API contract.
+- [x] Expose `claude-code` through the new template API contract.
+- [x] Expose `codex` through the new template API contract.
 - [x] Expose `shell-scripts-validation` through the new template API contract.
 - [x] Expose `webpage-inspector` through the new template API contract.
 - [x] Move built-in template definitions behind the internal template-service

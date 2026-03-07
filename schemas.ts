@@ -33,7 +33,7 @@ export const SandboxSummarySchema = coda.makeObjectSchema({
     templateSlug: {
       type: coda.ValueType.String,
       description:
-        "Template slug used to create this sandbox, such as standard or shell-scripts-validation.",
+        "Template slug used to create this sandbox, such as standard, claude-code, codex, shell-scripts-validation, or webpage-inspector.",
     },
     templateName: {
       type: coda.ValueType.String,

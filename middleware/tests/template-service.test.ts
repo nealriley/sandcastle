@@ -26,6 +26,8 @@ test("system template catalog exposes the current built-ins through the service 
   const entries = listSystemTemplateCatalogEntries();
 
   assert.ok(entries.some((entry) => entry.slug === "standard"));
+  assert.ok(entries.some((entry) => entry.slug === "claude-code"));
+  assert.ok(entries.some((entry) => entry.slug === "codex"));
   assert.ok(entries.some((entry) => entry.slug === "shell-scripts-validation"));
   assert.ok(entries.some((entry) => entry.slug === "webpage-inspector"));
   assert.ok(entries.every((entry) => entry.ownerType === "system"));

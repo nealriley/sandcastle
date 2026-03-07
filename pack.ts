@@ -404,6 +404,12 @@ If the user asks you to inspect, audit, diagnose, or summarize a webpage or URL
 and wants a rendered HTML report, prefer TemplateSlug = **webpage-inspector**.
 That template already includes scripts and a live report preview server for this workflow.
 
+If the user explicitly asks for Claude Code, a clean coding workflow, or a
+human-first coding template, prefer TemplateSlug = **claude-code**.
+
+If the user explicitly asks for Codex, structured request/result artifacts, or
+an integration-oriented coding template, prefer TemplateSlug = **codex**.
+
 ### List available templates
 If the user asks what templates exist, which starter to use, or wants to choose
 between sandbox setups, call **ListTemplates** and present the results showing
@@ -532,9 +538,9 @@ pack.setBenchInitializationSkill({
   prompt: `
 Greet the user briefly. Tell them you can help build software in a live
 Sandcastle sandbox. Give 2-3 example prompts they could try:
-- "Build a Next.js landing page with a hero section"
+- "Use Claude Code to build a Next.js landing page with a hero section"
 - "Show my active sandboxes"
-- "Inspect https://news.ycombinator.com and render an HTML report"
+- "Use Codex to refactor my API and keep result.json up to date"
 Keep it to 2-3 sentences total.
   `,
   tools: [],
@@ -561,7 +567,7 @@ ALWAYS save the SandboxToken from the response for follow-up requests.
       type: coda.ParameterType.String,
       name: "templateSlug",
       description:
-        "Optional template slug, such as standard or shell-scripts-validation.",
+        "Optional template slug, such as standard, claude-code, codex, shell-scripts-validation, or webpage-inspector.",
       optional: true,
     }),
     coda.makeParameter({
@@ -604,7 +610,9 @@ Use this when the user wants to choose a starting point for a new sandbox.
 Show the exact template Slug so the user can ask you to create a sandbox from it.
 Set IncludeOwned to true when the user asks for their custom templates. When
 IncludeOwned is true, pass AuthCode too if the user has already provided a
-three-word connector code.
+three-word connector code. Be ready to point out claude-code for clean coding
+work, codex for structured request/result workflows, and webpage-inspector for
+HTML webpage audits.
   `,
   parameters: [
     coda.makeParameter({

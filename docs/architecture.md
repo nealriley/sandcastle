@@ -172,6 +172,8 @@ Each template defines:
 Current built-in templates:
 
 - `standard`
+- `claude-code`
+- `codex`
 - `shell-scripts-validation`
 - `webpage-inspector`
 

@@ -17,15 +17,24 @@ import { FakeSandbox } from "./helpers/fake-sandbox.js";
 
 test("getSandcastleTemplate returns known templates by slug", () => {
   const standard = getSandcastleTemplate("standard");
+  const claudeCode = getSandcastleTemplate("claude-code");
+  const codex = getSandcastleTemplate("codex");
   const validation = getSandcastleTemplate("shell-scripts-validation");
 
   assert.equal(standard?.name, "Standard");
+  assert.equal(claudeCode?.name, "Claude Code");
+  assert.equal(codex?.name, "Codex");
   assert.equal(validation?.status, "live");
   assert.equal(getSandcastleTemplate("missing"), null);
 });
 
 test("getCreatableSandcastleTemplate only returns live templates", () => {
   assert.equal(getCreatableSandcastleTemplate("standard")?.slug, "standard");
+  assert.equal(
+    getCreatableSandcastleTemplate("claude-code")?.slug,
+    "claude-code"
+  );
+  assert.equal(getCreatableSandcastleTemplate("codex")?.slug, "codex");
   assert.equal(
     getCreatableSandcastleTemplate("shell-scripts-validation")?.slug,
     "shell-scripts-validation"
@@ -91,6 +100,45 @@ test("resolveTemplatePrompt gives webpage inspector concrete workflow instructio
   assert.match(prompt, /report-site\/index\.html/);
   assert.match(prompt, /https:\/\/example\.com/);
   assert.doesNotMatch(prompt, /secret-token/);
+});
+
+test("resolveTemplatePrompt gives Claude Code a light structured artifact workflow", () => {
+  const template = getSandcastleTemplate("claude-code");
+  assert.ok(template);
+
+  const prompt = resolveTemplatePrompt(
+    template,
+    "Update the dashboard styles. ```sandcastle-request\n{\"template\":\"claude-code\",\"version\":1,\"mode\":\"task\",\"prompt\":\"Update the dashboard styles.\",\"inputs\":{},\"constraints\":[],\"artifactsRequested\":[\"result.json\",\"result.md\"]}\n```",
+    {
+      INTERNAL_API_TOKEN: "secret-token",
+    }
+  );
+
+  assert.match(prompt, /Claude Code template/);
+  assert.match(prompt, /request\.json/);
+  assert.match(prompt, /result\.json/);
+  assert.match(prompt, /sandcastle-request/);
+  assert.match(prompt, /User request:/);
+  assert.doesNotMatch(prompt, /secret-token/);
+});
+
+test("resolveTemplatePrompt gives Codex a stricter structured contract", () => {
+  const template = getSandcastleTemplate("codex");
+  assert.ok(template);
+
+  const prompt = resolveTemplatePrompt(
+    template,
+    "Transform the API response shape and emit the structured artifacts.",
+    {
+      SERVICE_ACCOUNT_TOKEN: "super-secret-token",
+    }
+  );
+
+  assert.match(prompt, /Codex template/);
+  assert.match(prompt, /synthesize request\.json/);
+  assert.match(prompt, /template-contract\.mjs/);
+  assert.match(prompt, /result\.md/);
+  assert.doesNotMatch(prompt, /super-secret-token/);
 });
 
 test("validation template bootstrap writes the verification files", async () => {
@@ -280,4 +328,76 @@ test("webpage inspector template bootstrap writes scripts and starts the report 
   assert.match(renderedHtml, /<!doctype html>/i);
   assert.doesNotMatch(renderedHtml, /\\n/);
   await fs.rm(tempDir, { recursive: true, force: true });
+});
+
+test("provider templates bootstrap the contract files and helper script", async () => {
+  const template = getSandcastleTemplate("codex");
+  assert.ok(template);
+
+  const sandbox = new FakeSandbox();
+  await template.bootstrap(sandbox as never, {
+    runtime: "node24",
+    environment: {
+      SANDBOX_ENDPOINT: "https://example.test",
+      SANDBOX_TOKEN: "secret",
+    },
+  });
+
+  const readme = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/README.md",
+  });
+  const contract = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/CONTRACT.md",
+  });
+  const manifest = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/env-keys.txt",
+  });
+  const requestExample = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/request.example.json",
+  });
+  const requestPlaceholder = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/request.json",
+  });
+  const resultPlaceholder = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/result.json",
+  });
+  const resultMarkdown = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/result.md",
+  });
+  const contractLibrary = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/template-contract.mjs",
+  });
+  const showContract = await sandbox.readFileToBuffer({
+    path: "/vercel/sandbox/sandcastle-template/show-contract.sh",
+  });
+
+  assert.ok(readme);
+  assert.ok(contract);
+  assert.ok(manifest);
+  assert.ok(requestExample);
+  assert.ok(requestPlaceholder);
+  assert.ok(resultPlaceholder);
+  assert.ok(resultMarkdown);
+  assert.ok(contractLibrary);
+  assert.ok(showContract);
+
+  assert.match(readme.toString("utf-8"), /Sandcastle Codex Template/);
+  assert.match(contract.toString("utf-8"), /Structured request block/);
+  assert.equal(
+    manifest.toString("utf-8"),
+    "SANDBOX_ENDPOINT\nSANDBOX_TOKEN\n"
+  );
+  assert.match(requestExample.toString("utf-8"), /"template": "codex"/);
+  assert.match(requestPlaceholder.toString("utf-8"), /Replace this placeholder/);
+  assert.match(resultPlaceholder.toString("utf-8"), /"status": "needs_input"/);
+  assert.match(resultMarkdown.toString("utf-8"), /# Codex Result/);
+  assert.match(contractLibrary.toString("utf-8"), /extractStructuredRequestBlock/);
+  assert.match(showContract.toString("utf-8"), /REQUEST EXAMPLE:/);
+
+  assert.deepEqual(sandbox.commandLog, [
+    {
+      cmd: "bash",
+      args: ["-lc", "chmod +x /vercel/sandbox/sandcastle-template/show-contract.sh"],
+    },
+  ]);
 });
