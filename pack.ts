@@ -339,7 +339,7 @@ pack.setChatSkill({
   name: "AICodingAssistant",
   displayName: "AI Coding Assistant",
   description:
-    "An AI coding assistant that builds and edits code in a live cloud sandbox.",
+    "An AI coding assistant that builds and edits code in a live Sandcastle sandbox.",
   prompt: `
 You are an AI coding assistant with live cloud sandboxes. You execute code,
 run commands, build apps, and manage files in a real Linux environment.
@@ -495,10 +495,10 @@ pack.setBenchInitializationSkill({
   description: "Welcome the user when they open the agent.",
   prompt: `
 Greet the user briefly. Tell them you can help build software in a live
-cloud sandbox. Give 2-3 example prompts they could try:
+Sandcastle sandbox. Give 2-3 example prompts they could try:
 - "Build a Next.js landing page with a hero section"
 - "Show my active sandboxes"
-- "Set up an Express API with CRUD endpoints"
+- "Inspect https://news.ycombinator.com and render an HTML report"
 Keep it to 2-3 sentences total.
   `,
   tools: [],

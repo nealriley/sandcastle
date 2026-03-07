@@ -102,6 +102,7 @@ export default async function HomePage() {
             <li>Minimal tables and clear actions over decorative dashboards.</li>
             <li>Console-first sandbox detail pages instead of card overload.</li>
             <li>Explicit templates, connector flows, and ownership boundaries.</li>
+            <li>Launch-time environment variables and helper scripts stay attached to the sandbox that owns them.</li>
           </ul>
         </article>
       </section>
