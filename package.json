@@ -1,0 +1,15 @@
+{
+  "name": "ai-coding-agent",
+  "version": "1.0.0",
+  "description": "Sandcastle Pack for creating, resuming, and operating coding sandboxes from Superhuman Go.",
+  "main": "index.js",
+  "scripts": {
+    "test": "./node_modules/.bin/tsc -p tsconfig.test.json && node --test tests/**/*.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@codahq/packs-sdk": "^1.13.0"
+  }
+}

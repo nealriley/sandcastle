@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "incremental": false,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "plugins": []
+  },
+  "include": [
+    "lib/anthropic-proxy.ts",
+    "lib/tokens.ts",
+    "lib/types.ts",
+    "tests/**/*.test.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "scripts"
+  ]
+}

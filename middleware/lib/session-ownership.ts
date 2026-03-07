@@ -1,0 +1,165 @@
+import type {
+  OwnedSandboxStatus,
+  SessionOwnershipRecord,
+  SessionToken,
+  TaskStatus,
+} from "./types.js";
+import { getRedis } from "./redis";
+
+type SessionOwnershipRedis = {
+  expire(key: string, seconds: number): Promise<unknown>;
+  get<T>(key: string): Promise<T | null>;
+  set(
+    key: string,
+    value: unknown,
+    options?: { ex?: number }
+  ): Promise<unknown>;
+  zadd(
+    key: string,
+    input: { score: number; member: string }
+  ): Promise<unknown>;
+  zrange(
+    key: string,
+    start: number,
+    stop: number,
+    options?: { rev?: boolean }
+  ): Promise<unknown[]>;
+};
+
+const OWNERSHIP_TTL_SECONDS = 7 * 24 * 60 * 60;
+const MAX_LISTED_SESSIONS = 25;
+
+function sessionKeyKey(sessionKey: string): string {
+  return `session:${sessionKey}`;
+}
+
+function userSessionsKey(userId: string): string {
+  return `user_sessions:${userId}`;
+}
+
+export async function touchOwnedSession(args: {
+  session: SessionToken;
+  updatedAt: number;
+  latestPrompt: string | null;
+  status: OwnedSandboxStatus;
+  templateSlug?: string | null;
+  templateName?: string | null;
+  envKeys?: string[];
+}): Promise<SessionOwnershipRecord> {
+  return touchOwnedSessionInRedis(getRedis(), args);
+}
+
+export async function touchOwnedSessionInRedis(
+  redis: SessionOwnershipRedis,
+  args: {
+    session: SessionToken;
+    updatedAt: number;
+    latestPrompt: string | null;
+    status: OwnedSandboxStatus;
+    templateSlug?: string | null;
+    templateName?: string | null;
+    envKeys?: string[];
+  }
+): Promise<SessionOwnershipRecord> {
+  const existing = await redis.get<SessionOwnershipRecord>(
+    sessionKeyKey(args.session.sessionKey)
+  );
+
+  const record: SessionOwnershipRecord = {
+    sessionKey: args.session.sessionKey,
+    ownerUserId: args.session.ownerUserId,
+    ownerLogin: args.session.ownerLogin,
+    sandboxId: args.session.sandboxId,
+    templateSlug: args.templateSlug ?? existing?.templateSlug ?? null,
+    templateName: args.templateName ?? existing?.templateName ?? null,
+    envKeys: args.envKeys ?? existing?.envKeys ?? [],
+    runtime: args.session.runtime,
+    ports: args.session.ports,
+    createdAt: existing?.createdAt ?? args.session.createdAt,
+    updatedAt: args.updatedAt,
+    latestViewToken: args.session.viewToken,
+    latestPrompt: args.latestPrompt ?? existing?.latestPrompt ?? null,
+    status: args.status,
+  };
+
+  await redis.set(sessionKeyKey(args.session.sessionKey), record, {
+    ex: OWNERSHIP_TTL_SECONDS,
+  });
+  await redis.zadd(userSessionsKey(args.session.ownerUserId), {
+    score: record.updatedAt,
+    member: args.session.sessionKey,
+  });
+  await redis.expire(userSessionsKey(args.session.ownerUserId), OWNERSHIP_TTL_SECONDS);
+
+  return record;
+}
+
+export async function getOwnedSession(
+  sessionKey: string
+): Promise<SessionOwnershipRecord | null> {
+  return getOwnedSessionInRedis(getRedis(), sessionKey);
+}
+
+export async function getOwnedSessionInRedis(
+  redis: SessionOwnershipRedis,
+  sessionKey: string
+): Promise<SessionOwnershipRecord | null> {
+  return redis.get<SessionOwnershipRecord>(sessionKeyKey(sessionKey));
+}
+
+export async function listOwnedSessions(
+  userId: string
+): Promise<SessionOwnershipRecord[]> {
+  return listOwnedSessionsInRedis(getRedis(), userId);
+}
+
+export async function listOwnedSessionsInRedis(
+  redis: SessionOwnershipRedis,
+  userId: string
+): Promise<SessionOwnershipRecord[]> {
+  const sessionKeys =
+    ((await redis.zrange(
+      userSessionsKey(userId),
+      0,
+      MAX_LISTED_SESSIONS - 1,
+      { rev: true }
+    )) as string[] | null) ?? [];
+
+  if (sessionKeys.length === 0) {
+    return [];
+  }
+
+  const records = await Promise.all(
+    sessionKeys.map((sessionKey: string) =>
+      redis.get<SessionOwnershipRecord>(sessionKeyKey(sessionKey))
+    )
+  );
+
+  return records.filter(
+    (record: SessionOwnershipRecord | null): record is SessionOwnershipRecord =>
+      record != null && record.ownerUserId === userId
+  );
+}
+
+export async function findOwnedSessionBySandboxId(
+  userId: string,
+  sandboxId: string
+): Promise<SessionOwnershipRecord | null> {
+  return findOwnedSessionBySandboxIdInRedis(getRedis(), userId, sandboxId);
+}
+
+export async function findOwnedSessionBySandboxIdInRedis(
+  redis: SessionOwnershipRedis,
+  userId: string,
+  sandboxId: string
+): Promise<SessionOwnershipRecord | null> {
+  const records = await listOwnedSessionsInRedis(redis, userId);
+  return records.find((record) => record.sandboxId === sandboxId) ?? null;
+}
+
+export function ownedSessionStatus(
+  stopped: boolean,
+  current: TaskStatus
+): OwnedSandboxStatus {
+  return stopped || current === "stopped" ? "stopped" : "active";
+}
