@@ -2,11 +2,12 @@ import {
   assertWebsiteAuthConfigured,
   getWebsiteAuthConfigurationError,
 } from "../auth";
+import { assertTemplateServiceInternalAuthConfigured } from "./auth";
 import { assertRedisConfiguration } from "./redis";
 import {
-  assertTemplateConfiguration,
-  listTemplateConfigurationWarnings,
-} from "./templates";
+  assertTemplateServiceConfiguration,
+} from "./template-service";
+import { assertTemplateConfiguration, listTemplateConfigurationWarnings } from "./templates";
 import { assertSessionStartTokenConfiguration } from "./tokens";
 
 export interface StartupValidationCheck {
@@ -75,9 +76,19 @@ export function collectStartupValidationReport(): StartupValidationReport {
       "Website auth configuration is complete."
     ),
     validateCheck(
+      "template_service_auth",
+      () => assertTemplateServiceInternalAuthConfigured(),
+      "Template service internal auth is configured."
+    ),
+    validateCheck(
       "templates",
       () => assertTemplateConfiguration(),
       "Template registry configuration is valid."
+    ),
+    validateCheck(
+      "template_service_catalog",
+      () => assertTemplateServiceConfiguration(),
+      "Template service catalog is valid."
     ),
   ];
 

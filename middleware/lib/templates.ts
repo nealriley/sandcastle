@@ -591,6 +591,7 @@ export function listSandcastleTemplateCatalog(): SandcastleTemplateCatalogEntry[
 export function listSandcastleTemplateSummaries(): TemplateSummary[] {
   return sandcastleTemplates.map((template) => ({
     slug: template.slug,
+    ownerType: "system",
     name: template.name,
     summary: template.summary,
     purpose: template.purpose,

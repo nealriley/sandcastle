@@ -6,10 +6,17 @@ import {
   isWebsiteAuthConfigured,
   WebsiteAuthConfigurationError,
 } from "../auth.js";
-import { invalidTokenResponse, validateAuth } from "../lib/auth.js";
+import {
+  assertTemplateServiceInternalAuthConfigured,
+  invalidTokenResponse,
+  validateAuth,
+  validateTemplateServiceInternalAuth,
+} from "../lib/auth.js";
 import { TokenConfigurationError } from "../lib/tokens.js";
 
 const ORIGINAL_AGENT_API_KEY = process.env.AGENT_API_KEY;
+const ORIGINAL_TEMPLATE_SERVICE_INTERNAL_KEY =
+  process.env.TEMPLATE_SERVICE_INTERNAL_KEY;
 const ORIGINAL_AUTH_SECRET = process.env.AUTH_SECRET;
 const ORIGINAL_NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET;
 const ORIGINAL_AUTH_GITHUB_ID = process.env.AUTH_GITHUB_ID;
@@ -19,6 +26,8 @@ const ORIGINAL_GITHUB_SECRET = process.env.GITHUB_SECRET;
 
 test.afterEach(() => {
   process.env.AGENT_API_KEY = ORIGINAL_AGENT_API_KEY;
+  process.env.TEMPLATE_SERVICE_INTERNAL_KEY =
+    ORIGINAL_TEMPLATE_SERVICE_INTERNAL_KEY;
   process.env.AUTH_SECRET = ORIGINAL_AUTH_SECRET;
   process.env.NEXTAUTH_SECRET = ORIGINAL_NEXTAUTH_SECRET;
   process.env.AUTH_GITHUB_ID = ORIGINAL_AUTH_GITHUB_ID;
@@ -69,6 +78,39 @@ test("validateAuth accepts the configured agent key", () => {
   );
 
   assert.equal(response, null);
+});
+
+test("template service internal auth uses a dedicated key when configured and falls back to the agent key otherwise", async () => {
+  process.env.AGENT_API_KEY = "agent-key";
+  process.env.TEMPLATE_SERVICE_INTERNAL_KEY = "template-key";
+
+  assert.equal(
+    assertTemplateServiceInternalAuthConfigured(),
+    "template-key"
+  );
+
+  const missing = validateTemplateServiceInternalAuth(
+    requestWithHeaders() as never
+  );
+  assert.ok(missing);
+  assert.equal(missing.status, 401);
+
+  const wrong = validateTemplateServiceInternalAuth(
+    requestWithHeaders({ "X-Template-Service-Key": "wrong" }) as never
+  );
+  assert.ok(wrong);
+  assert.equal(wrong.status, 401);
+
+  const valid = validateTemplateServiceInternalAuth(
+    requestWithHeaders({ "X-Template-Service-Key": "template-key" }) as never
+  );
+  assert.equal(valid, null);
+
+  delete process.env.TEMPLATE_SERVICE_INTERNAL_KEY;
+  assert.equal(
+    assertTemplateServiceInternalAuthConfigured(),
+    "agent-key"
+  );
 });
 
 test("website auth configuration reports missing settings and rejects partial config", () => {

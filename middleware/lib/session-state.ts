@@ -769,9 +769,9 @@ function inferRecoveryHint(args: {
 }): string | null {
   switch (args.errorCode) {
     case "auth_required":
-      return "Open the Sandcastle Connector, sign in with GitHub, and retry with a fresh three-word connector code.";
+      return "Open Sandcastle Connect, sign in with GitHub, and retry with a fresh three-word connect code.";
     case "invalid_auth_code":
-      return "The connector code is invalid or expired. Open the Sandcastle Connector and retry with a fresh three-word code.";
+      return "The connect code is invalid or expired. Open Sandcastle Connect and retry with a fresh three-word code.";
     case "sandbox_busy":
       return "This sandbox is already handling another task. Wait for the current task to finish, then retry the follow-up prompt.";
     case "sandbox_stopped":

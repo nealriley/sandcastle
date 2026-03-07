@@ -8,7 +8,10 @@ import {
 import { listOwnedSessions } from "@/lib/session-ownership";
 import { normalizePairingCode, readPairingCode } from "@/lib/pairing";
 import { restoreOwnedSandboxSession } from "@/lib/owned-sandbox";
-import { listSandcastleTemplateSummaries } from "@/lib/templates";
+import {
+  listLaunchableTemplateSummaries,
+  listSystemTemplateSummaries,
+} from "@/lib/template-service";
 import { buildConnectorUrl, buildSandboxUrl } from "@/lib/url";
 import type {
   SandboxListResponse,
@@ -26,12 +29,12 @@ function authRequiredResponse(
   const authUrl = buildConnectorUrl(req);
   const error =
     errorCode === "auth_required"
-      ? "Website authentication is required before listing owned sandboxes. Open the Sandcastle Connector, sign in with GitHub, and paste the three-word connector code into SHGO."
-      : "That three-word connector code is invalid or expired. Open the Sandcastle Connector and try again.";
+      ? "Website authentication is required before listing owned sandboxes. Open Sandcastle Connect, sign in with GitHub, and paste the three-word connect code into SHGO."
+      : "That three-word connect code is invalid or expired. Open Sandcastle Connect and try again.";
 
   const response: SandboxListResponse = {
     sandboxes: [],
-    templates: listSandcastleTemplateSummaries(),
+    templates: listSystemTemplateSummaries(),
     authUrl,
     errorCode,
     error,
@@ -142,7 +145,7 @@ export async function POST(req: NextRequest) {
 
     const response: SandboxListResponse = {
       sandboxes,
-      templates: listSandcastleTemplateSummaries(),
+      templates: await listLaunchableTemplateSummaries(pairing.userId),
       authUrl: null,
       errorCode: null,
       error: null,

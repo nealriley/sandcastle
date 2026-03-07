@@ -45,8 +45,8 @@ function authRequiredResponse(
   const authUrl = buildConnectorUrl(req);
   const error =
     errorCode === "auth_required"
-      ? "Website authentication is required before resuming an owned sandbox. Open the Sandcastle Connector, sign in with GitHub, and paste the three-word connector code into SHGO."
-      : "That three-word connector code is invalid or expired. Open the Sandcastle Connector and try again.";
+      ? "Website authentication is required before resuming an owned sandbox. Open Sandcastle Connect, sign in with GitHub, and paste the three-word connect code into SHGO."
+      : "That three-word connect code is invalid or expired. Open Sandcastle Connect and try again.";
 
   const response: TaskResponse = {
     taskId: "",
@@ -75,7 +75,7 @@ function authRequiredResponse(
     errorCode,
     recoveryAction: "authenticate",
     recoveryHint:
-      "Open the Sandcastle Connector, sign in with GitHub, and retry with a fresh three-word connector code.",
+      "Open Sandcastle Connect, sign in with GitHub, and retry with a fresh three-word connect code.",
     retryAfterMs: null,
     error,
   };

@@ -3,11 +3,13 @@ import { getWebsiteUser } from "@/auth";
 import { tokenConfigurationErrorResponse } from "@/lib/auth";
 import { createOwnedSandboxTask, MAX_PROMPT_LENGTH, VALID_RUNTIMES } from "@/lib/create-owned-sandbox";
 import {
-  DEFAULT_TEMPLATE_SLUG,
-  getCreatableSandcastleTemplate,
   resolveTemplatePrompt,
   resolveTemplateEnvironment,
 } from "@/lib/templates";
+import {
+  getDefaultTemplateSlug,
+  resolveLaunchableTemplateBySlug,
+} from "@/lib/template-service";
 import {
   normalizeSandboxEnvironment,
   type SandboxEnvironmentEntryInput,
@@ -53,7 +55,7 @@ export async function POST(req: NextRequest) {
   const {
     prompt = "",
     runtime = "node24",
-    templateSlug = DEFAULT_TEMPLATE_SLUG,
+    templateSlug = getDefaultTemplateSlug(),
     environment = [],
   } = body;
 
@@ -87,7 +89,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const template = getCreatableSandcastleTemplate(templateSlug);
+  const template = await resolveLaunchableTemplateBySlug(templateSlug, user.id);
   if (!template) {
     return Response.json(
       {

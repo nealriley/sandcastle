@@ -42,7 +42,7 @@ export default async function SandboxesIndexPage() {
           <h1 className="page-title">Owned sandboxes</h1>
           <p className="page-subtitle">
             Signed in as @{user.login ?? user.name ?? user.id}. Start a sandbox
-            from Sandcastle, or use Connector when SHGO needs to create one for
+            from Sandcastle, or use Connect when SHGO needs to create one for
             you.
           </p>
         </div>
@@ -52,7 +52,7 @@ export default async function SandboxesIndexPage() {
             Browse templates
           </Link>
           <Link href="/connector" className="button button--ghost">
-            Open Connector
+            Open Connect
           </Link>
         </div>
       </section>
@@ -102,7 +102,7 @@ export default async function SandboxesIndexPage() {
         {rows.length === 0 ? (
           <div className="empty-state">
             No owned sandboxes yet. Create one here, or start in SHGO after
-            generating a phrase from <Link href="/connector">Connector</Link>,
+            generating a phrase from <Link href="/connector">Connect</Link>,
             and it will appear in this table automatically.
           </div>
         ) : (

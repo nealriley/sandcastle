@@ -126,6 +126,9 @@ export function getAuthOptions(): NextAuthOptions {
     session: {
       strategy: "jwt",
     },
+    pages: {
+      signIn: "/signin",
+    },
     providers: [
       GitHubProvider({
         clientId: config.github.clientId,
@@ -204,5 +207,5 @@ export async function requireWebsiteUser(callbackPath = "/sandboxes") {
   }
 
   const callbackUrl = encodeURIComponent(callbackPath);
-  redirect(`/api/auth/signin/github?callbackUrl=${callbackUrl}`);
+  redirect(`/signin?callbackUrl=${callbackUrl}`);
 }

@@ -7,9 +7,9 @@ import { isRateLimitError } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
-  title: "Connector — Sandcastle",
+  title: "Connect — Sandcastle",
   description:
-    "Connector codes for pairing SHGO with your owned Sandcastle sandboxes",
+    "Connect codes for pairing SHGO with your owned Sandcastle sandboxes",
 };
 
 function formatExpiry(ts: number): string {
@@ -21,7 +21,7 @@ function formatExpiry(ts: number): string {
   });
 }
 
-export default async function ConnectorPage() {
+export default async function ConnectPage() {
   const user = await requireWebsiteUser("/connector");
 
   try {
@@ -31,8 +31,8 @@ export default async function ConnectorPage() {
       <div className="page-stack">
         <section className="page-header">
           <div className="page-header__copy">
-            <p className="page-kicker">Connector</p>
-            <h1 className="page-title">Generate a three-word connector code</h1>
+            <p className="page-kicker">Connect</p>
+            <h1 className="page-title">Generate a three-word connect code</h1>
             <p className="page-subtitle">
               Signed in as{" "}
               <strong>
@@ -56,12 +56,12 @@ export default async function ConnectorPage() {
         <div className="detail-grid detail-grid--connect">
           <section className="panel">
             <div className="panel__header panel__header--split">
-              <div>
-                <p className="page-kicker">Current code</p>
-                <h2 className="panel__title">Short-lived connector auth</h2>
-              </div>
-              <CopyCodeButton text={pairing.code} />
+            <div>
+              <p className="page-kicker">Current code</p>
+              <h2 className="panel__title">Short-lived connect auth</h2>
             </div>
+            <CopyCodeButton text={pairing.code} />
+          </div>
 
             <div className="phrase-block">{pairing.code}</div>
 
@@ -77,7 +77,7 @@ export default async function ConnectorPage() {
               </div>
               <div className="stat-card">
                 <div className="stat-card__label">Scope</div>
-                <div className="stat-card__value">Current SHGO pairing</div>
+                <div className="stat-card__value">Current SHGO handoff</div>
                 <div className="stat-card__detail">
                   Use it while SHGO lists, resumes, or creates your next
                   sandbox.
@@ -126,8 +126,8 @@ export default async function ConnectorPage() {
       <div className="page-stack">
         <section className="page-header">
           <div className="page-header__copy">
-            <p className="page-kicker">Connector</p>
-            <h1 className="page-title">Connector refresh is throttled</h1>
+            <p className="page-kicker">Connect</p>
+            <h1 className="page-title">Connect refresh is throttled</h1>
             <p className="page-subtitle">{error.message}</p>
           </div>
 
@@ -140,7 +140,7 @@ export default async function ConnectorPage() {
 
         <div className="alert alert--error">
           Try again in about {error.retryAfterSeconds} seconds. This limit keeps
-          connector-code generation abuse-resistant.
+          connect-code generation abuse-resistant.
         </div>
       </div>
     );

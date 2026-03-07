@@ -26,11 +26,13 @@ import {
   assertSessionStartTokenConfiguration,
 } from "@/lib/tokens";
 import {
-  DEFAULT_TEMPLATE_SLUG,
-  getCreatableSandcastleTemplate,
   resolveTemplateEnvironment,
   resolveTemplatePrompt,
 } from "@/lib/templates";
+import {
+  getDefaultTemplateSlug,
+  resolveLaunchableTemplateBySlug,
+} from "@/lib/template-service";
 import { buildConnectorUrl, buildTemplateValidationUrl } from "@/lib/url";
 import { createOwnedSandboxTask, MAX_PROMPT_LENGTH, VALID_RUNTIMES } from "@/lib/create-owned-sandbox";
 import type { RuntimeName, TaskResponse } from "@/lib/types";
@@ -39,8 +41,8 @@ function authRequiredResponse(req: NextRequest, errorCode: "auth_required" | "in
   const authUrl = buildConnectorUrl(req);
   const error =
     errorCode === "auth_required"
-      ? "Website authentication is required before creating a sandbox. Open the Sandcastle Connector, sign in with GitHub, and paste the three-word connector code into SHGO."
-      : "That three-word connector code is invalid, expired, or already used. Open the Sandcastle Connector and try again.";
+      ? "Website authentication is required before creating a sandbox. Open Sandcastle Connect, sign in with GitHub, and paste the three-word connect code into SHGO."
+      : "That three-word connect code is invalid, expired, or already used. Open Sandcastle Connect and try again.";
 
   const response: TaskResponse = {
     taskId: "",
@@ -69,7 +71,7 @@ function authRequiredResponse(req: NextRequest, errorCode: "auth_required" | "in
     errorCode,
     recoveryAction: "authenticate",
     recoveryHint:
-      "Open the Sandcastle Connector, sign in with GitHub, and retry with a fresh three-word connector code.",
+      "Open Sandcastle Connect, sign in with GitHub, and retry with a fresh three-word connect code.",
     retryAfterMs: null,
     error,
   };
@@ -107,7 +109,7 @@ export async function POST(req: NextRequest) {
     prompt,
     runtime = "node24",
     authCode,
-    templateSlug = DEFAULT_TEMPLATE_SLUG,
+    templateSlug = getDefaultTemplateSlug(),
   } = body;
 
   if (!prompt || typeof prompt !== "string") {
@@ -157,57 +159,6 @@ export async function POST(req: NextRequest) {
     return tokenConfigurationErrorResponse(error);
   }
 
-  const template = getCreatableSandcastleTemplate(templateSlug);
-  if (!template) {
-    return Response.json(
-      {
-        error: `Template '${templateSlug}' is not available for sandbox creation yet.`,
-      },
-      { status: 400 }
-    );
-  }
-
-  if (!template.supportedRuntimes.includes(requestedRuntime)) {
-    return Response.json(
-      {
-        error: `Template '${template.name}' supports runtimes: ${template.supportedRuntimes.join(", ")}.`,
-      },
-      { status: 400 }
-    );
-  }
-
-  if (
-    template.source.kind === "snapshot" &&
-    process.env[template.source.snapshotEnvVar] &&
-    requestedRuntime !== template.source.snapshotRuntime
-  ) {
-    return Response.json(
-      {
-        error: `Snapshot-backed sandboxes for template '${template.name}' currently support only ${template.source.snapshotRuntime}.`,
-      },
-      { status: 400 }
-    );
-  }
-
-  const resolvedEnvironment = resolveTemplateEnvironment(template, {}, {
-    templateValidationUrl: buildTemplateValidationUrl(req),
-  });
-  const resolvedEnvKeys = Object.keys(resolvedEnvironment).sort();
-
-  try {
-    resolveTemplatePrompt(template, prompt, resolvedEnvironment);
-  } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Invalid template prompt configuration.",
-      },
-      { status: 400 }
-    );
-  }
-
   try {
     let normalizedAuthCode: string | null = null;
     try {
@@ -219,6 +170,60 @@ export async function POST(req: NextRequest) {
     const pairingPreview = await readPairingCode(authCode);
     if (!pairingPreview) {
       return authRequiredResponse(req, "invalid_auth_code");
+    }
+
+    const template = await resolveLaunchableTemplateBySlug(
+      templateSlug,
+      pairingPreview.userId
+    );
+    if (!template) {
+      return Response.json(
+        {
+          error: `Template '${templateSlug}' is not available for sandbox creation yet.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!template.supportedRuntimes.includes(requestedRuntime)) {
+      return Response.json(
+        {
+          error: `Template '${template.name}' supports runtimes: ${template.supportedRuntimes.join(", ")}.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      template.source.kind === "snapshot" &&
+      process.env[template.source.snapshotEnvVar] &&
+      requestedRuntime !== template.source.snapshotRuntime
+    ) {
+      return Response.json(
+        {
+          error: `Snapshot-backed sandboxes for template '${template.name}' currently support only ${template.source.snapshotRuntime}.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const resolvedEnvironment = resolveTemplateEnvironment(template, {}, {
+      templateValidationUrl: buildTemplateValidationUrl(req),
+    });
+    const resolvedEnvKeys = Object.keys(resolvedEnvironment).sort();
+
+    try {
+      resolveTemplatePrompt(template, prompt, resolvedEnvironment);
+    } catch (error) {
+      return Response.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Invalid template prompt configuration.",
+        },
+        { status: 400 }
+      );
     }
 
     await enforceSessionCreateLimits(pairingPreview.userId);

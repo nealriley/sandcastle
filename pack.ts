@@ -210,6 +210,9 @@ function emptyTemplateListResponse(): TemplateListResponse {
   return {
     templates: [],
     defaultTemplateSlug: "standard",
+    authUrl: null,
+    errorCode: null,
+    error: null,
   };
 }
 
@@ -224,19 +227,48 @@ function normalizeTemplateListResponse(
 }
 
 async function listTemplates(
-  context: coda.ExecutionContext
+  context: coda.ExecutionContext,
+  authCode?: string,
+  includeOwned?: boolean
 ): Promise<TemplateListResponse> {
-  const response = await context.fetcher.fetch({
-    method: "GET",
-    disableAuthentication: true,
-    url: apiUrl("/api/templates", {
-      _t: String(Date.now()),
-    }),
-  });
+  try {
+    const shouldIncludeOwned = Boolean(includeOwned);
+    const response = await context.fetcher.fetch(
+      shouldIncludeOwned || authCode
+        ? {
+            method: "POST",
+            disableAuthentication: true,
+            url: apiUrl("/api/templates"),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              authCode,
+              includeOwned: shouldIncludeOwned,
+            }),
+          }
+        : {
+            method: "GET",
+            disableAuthentication: true,
+            url: apiUrl("/api/templates", {
+              _t: String(Date.now()),
+            }),
+          }
+    );
 
-  return normalizeTemplateListResponse(
-    response.body as Partial<TemplateListResponse>
-  );
+    return normalizeTemplateListResponse(
+      response.body as Partial<TemplateListResponse>
+    );
+  } catch (error) {
+    if (coda.StatusCodeError.isStatusCodeError(error)) {
+      const statusError = error as coda.StatusCodeError;
+      if (typeof statusError.body === "object" && statusError.body) {
+        return normalizeTemplateListResponse(
+          statusError.body as Partial<TemplateListResponse>
+        );
+      }
+    }
+
+    throw error;
+  }
 }
 
 async function listSandboxes(
@@ -374,8 +406,11 @@ That template already includes scripts and a live report preview server for this
 
 ### List available templates
 If the user asks what templates exist, which starter to use, or wants to choose
-between built-in sandbox setups, call **ListTemplates** and present the results
-showing Name, Slug, Summary, SourceKind, and DefaultRuntime.
+between sandbox setups, call **ListTemplates** and present the results showing
+Name, Slug, OwnerType, Summary, SourceKind, and DefaultRuntime.
+If the user asks for their custom templates or templates they created, set
+IncludeOwned to true. If they already pasted a connector code, pass it as
+AuthCode too.
 
 ### Continue the currently selected sandbox
 If you already have a SandboxToken for the currently selected sandbox and the
@@ -423,8 +458,8 @@ Call **StopSandbox** with the SandboxToken to free resources.
 
 ## Auth handshake for new sandboxes and sandbox search
 
-If CodeTask, ListSandboxes, or ResumeSandbox returns ErrorCode = "auth_required"
-or "invalid_auth_code":
+If CodeTask, ListTemplates, ListSandboxes, or ResumeSandbox returns ErrorCode =
+"auth_required" or "invalid_auth_code":
 - tell the user to open AuthUrl
 - tell them to sign in with GitHub
 - tell them to copy the three-word connector code shown on the Sandcastle website and paste it here
@@ -448,7 +483,7 @@ Sandbox list results:
 Sandboxes, Templates, AuthUrl, ErrorCode, Error
 
 Template list results:
-Templates, DefaultTemplateSlug
+Templates, DefaultTemplateSlug, AuthUrl, ErrorCode, Error
 
 ## When you present results
 
@@ -474,8 +509,9 @@ Templates, DefaultTemplateSlug
 - If SandboxUrl is set, share it as the main browser console
 - If ListSandboxes returns results, show the sandbox ids clearly so the user can
   pick one and tell you which sandbox to continue
-- If ListTemplates returns results, recommend the most suitable template briefly
-  and show the exact template slug the user can ask for
+- If ListTemplates returns results, recommend the most suitable template briefly,
+  show whether each one is system or user-owned when helpful, and show the exact
+  template slug the user can ask for
 - If Error is set, explain what went wrong
 - If RecoveryHint is present, include it
 - Always remind the user they can ask for more changes
@@ -562,17 +598,36 @@ ALWAYS save the SandboxToken from the response for follow-up requests.
 pack.addFormula({
   name: "ListTemplates",
   description:
-    "List the built-in Sandcastle templates available for new sandbox creation.",
+    "List the Sandcastle templates available for new sandbox creation.",
   instructions: `
 Use this when the user wants to choose a starting point for a new sandbox.
 Show the exact template Slug so the user can ask you to create a sandbox from it.
+Set IncludeOwned to true when the user asks for their custom templates. When
+IncludeOwned is true, pass AuthCode too if the user has already provided a
+three-word connector code.
   `,
-  parameters: [],
+  parameters: [
+    coda.makeParameter({
+      type: coda.ParameterType.String,
+      name: "authCode",
+      description:
+        "Optional three-word connector code copied from the Sandcastle Connector page.",
+      optional: true,
+    }),
+    coda.makeParameter({
+      type: coda.ParameterType.Boolean,
+      name: "includeOwned",
+      description:
+        "Set to true when the user wants their own custom templates included alongside system templates.",
+      optional: true,
+    }),
+  ],
   resultType: coda.ValueType.Object,
   schema: TemplateListResultSchema,
   cacheTtlSecs: 0,
-  execute: async function (_args, context) {
-    return await listTemplates(context);
+  execute: async function (args, context) {
+    const [authCode, includeOwned] = args;
+    return await listTemplates(context, authCode, includeOwned);
   },
 });
 

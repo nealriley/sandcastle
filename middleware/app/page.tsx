@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import BrandLogo from "./brand-logo";
 import {
   getWebsiteAuthConfigurationError,
   getWebsiteUser,
@@ -20,23 +21,23 @@ export default async function HomePage() {
   }
 
   return (
-    <div className="page-stack">
-      <section className="auth-hero">
-        <div className="panel auth-hero__copy">
-          <p className="page-kicker">Sandcastle</p>
-          <h1 className="hero-title">
-            Own, inspect, and resume every coding sandbox from one place.
+    <div className="landing">
+      <section className="panel landing-hero">
+        <div className="landing-hero__copy">
+          <p className="page-kicker">Cloud sandboxes for connected workflows</p>
+          <h1 className="hero-title hero-title--landing">
+            Run sandboxes in the cloud with Sandcastle.
           </h1>
           <p className="page-subtitle">
-            Sandcastle is the stable control plane for sandboxes, templates,
-            Connector handoffs, previews, and live execution output. SHGO can
-            start or resume work without being the only place that state lives.
+            Sandcastle gives teams a stable place to launch, own, inspect, and
+            resume cloud sandboxes. Templates, previews, logs, and follow-up
+            prompts all stay in one browser-first control plane.
           </p>
 
           <div className="page-header__actions">
             {authConfigured ? (
               <Link
-                href="/api/auth/signin/github?callbackUrl=%2Fsandboxes"
+                href="/signin?callbackUrl=%2Fsandboxes"
                 className="button button--primary"
               >
                 Sign in with GitHub
@@ -47,63 +48,48 @@ export default async function HomePage() {
               </span>
             )}
           </div>
+
+          <div className="integration-strip">
+            <span className="integration-strip__label">
+              Connections available today
+            </span>
+            <span className="tag">SuperHuman Go</span>
+            <span className="tag tag--muted">More coming soon</span>
+          </div>
         </div>
 
-        <section className="panel panel--muted">
-          <div className="panel__header">
-            <div>
-              <p className="page-kicker">Control plane</p>
-              <h2 className="panel__title">How Sandcastle works</h2>
-            </div>
-          </div>
-
-          <ol className="step-list">
-            <li>
-              <strong>Sign in.</strong> Your GitHub identity becomes the owner
-              for every sandbox created from the web or paired through SHGO.
-            </li>
-            <li>
-              <strong>Create or connect.</strong> Start a sandbox from
-              Sandcastle, or use Connector when SHGO needs a short-lived
-              three-word code.
-            </li>
-            <li>
-              <strong>Operate from the browser.</strong> Keep console output,
-              preview links, templates, and follow-up prompts in the web UI
-              while SHGO remains a client of the same sandbox.
-            </li>
-          </ol>
-        </section>
+        <div className="landing-hero__media">
+          <BrandLogo variant="hero" priority />
+        </div>
       </section>
 
-      <section className="auth-grid">
-        <article className="panel">
-          <div className="panel__header">
-            <div>
-              <p className="page-kicker">Why this exists</p>
-              <h2 className="panel__title">Chat is no longer the bottleneck</h2>
-            </div>
-          </div>
-          <ul className="bullet-list">
-            <li>Long-running sandbox tasks survive beyond a single request.</li>
-            <li>Logs and previews stay visible in a stable browser session.</li>
-            <li>Every sandbox remains resumable through ownership and Connector.</li>
-          </ul>
+      <section className="landing-pillars">
+        <article className="panel pillar-card">
+          <p className="page-kicker">Own the runtime</p>
+          <h2 className="panel__title">Every sandbox has a durable home</h2>
+          <p className="panel__description">
+            Keep ownership, templates, prompts, previews, and session history
+            attached to the same sandbox instead of losing state in chat.
+          </p>
         </article>
 
-        <article className="panel">
-          <div className="panel__header">
-            <div>
-              <p className="page-kicker">Product surface</p>
-              <h2 className="panel__title">What Sandcastle optimizes for</h2>
-            </div>
-          </div>
-          <ul className="bullet-list">
-            <li>Minimal tables and clear actions over decorative dashboards.</li>
-            <li>Console-first sandbox detail pages instead of card overload.</li>
-            <li>Explicit templates, connector flows, and ownership boundaries.</li>
-            <li>Launch-time environment variables and helper scripts stay attached to the sandbox that owns them.</li>
-          </ul>
+        <article className="panel pillar-card">
+          <p className="page-kicker">Operate from the browser</p>
+          <h2 className="panel__title">Live console, preview, and control</h2>
+          <p className="panel__description">
+            Watch long-running tasks, inspect HTML previews, send prompts, and
+            stop work without leaving the web UI.
+          </p>
+        </article>
+
+        <article className="panel pillar-card">
+          <p className="page-kicker">Connect automation</p>
+          <h2 className="panel__title">SuperHuman Go today, more soon</h2>
+          <p className="panel__description">
+            Use Connect to pair SHGO into the same owned sandbox workflow today.
+            Additional integrations can land without changing the ownership
+            model.
+          </p>
         </article>
       </section>
     </div>

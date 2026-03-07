@@ -41,6 +41,7 @@ export type TemplateSourceKind = "runtime" | "snapshot";
 
 export interface TemplateSummary {
   slug: string;
+  ownerType: "system" | "user";
   name: string;
   summary: string;
   purpose: string;
@@ -54,6 +55,9 @@ export interface TemplateSummary {
 export interface TemplateListResponse {
   templates: TemplateSummary[];
   defaultTemplateSlug: string;
+  authUrl: string | null;
+  errorCode: "auth_required" | "invalid_auth_code" | null;
+  error: string | null;
 }
 
 /**

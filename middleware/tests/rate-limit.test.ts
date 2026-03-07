@@ -27,7 +27,7 @@ test("pairing generation limit allows a few new codes and then blocks refresh ch
     () => enforcePairingGenerationLimitForRedis(fakeRedis, "user_123"),
     (error: unknown) =>
       error instanceof RateLimitError &&
-      error.message.includes("Too many new connector codes")
+      error.message.includes("Too many new connect codes")
   );
 });
 
@@ -49,7 +49,7 @@ test("pairing redemption limit applies both globally and per code", async () => 
       ),
     (error: unknown) =>
       error instanceof RateLimitError &&
-      error.message.includes("three-word connector code")
+      error.message.includes("three-word connect code")
   );
 });
 

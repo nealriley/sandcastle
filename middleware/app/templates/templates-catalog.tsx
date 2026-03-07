@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { TemplateCatalogEntry } from "@/lib/template-service-types";
 import type { RuntimeName } from "@/lib/types";
-import type { SandcastleTemplateCatalogEntry } from "@/lib/templates";
 import { summarizeTemplateRuntimes } from "@/lib/templates";
 
 type CreateSandboxResponse = {
@@ -52,27 +52,34 @@ function makeRowId(): string {
 }
 
 function buildDefaultEnvironmentRows(
-  template: SandcastleTemplateCatalogEntry | null
+  template: TemplateCatalogEntry | null
 ): EnvironmentRow[] {
-  if (!template || template.envHints.length === 0) {
+  if (!template || template.environmentSchema.length === 0) {
     return [];
   }
 
-  return template.envHints.map((hint) => ({
+  return template.environmentSchema.map((field) => ({
     id: makeRowId(),
-    key: hint.key,
-    value: "",
+    key: field.key,
+    value: field.defaultValue ?? "",
   }));
+}
+
+function isLaunchableTemplate(template: TemplateCatalogEntry): boolean {
+  return (
+    template.templateStatus === "active" &&
+    template.latestVersionState === "published"
+  );
 }
 
 export default function TemplatesCatalog({
   templates,
 }: {
-  templates: SandcastleTemplateCatalogEntry[];
+  templates: TemplateCatalogEntry[];
 }) {
   const router = useRouter();
   const liveTemplates = useMemo(
-    () => templates.filter((template) => template.status === "live"),
+    () => templates.filter(isLaunchableTemplate),
     [templates]
   );
   const [selectedTemplateSlug, setSelectedTemplateSlug] = useState<string | null>(
@@ -110,8 +117,8 @@ export default function TemplatesCatalog({
 
   async function handleCreate() {
     const nextPrompt = prompt.trim();
-    if (!selectedTemplate || selectedTemplate.status !== "live") {
-      setFeedback("Choose a live template before creating a sandbox.");
+    if (!selectedTemplate || !isLaunchableTemplate(selectedTemplate)) {
+      setFeedback("Choose a published template before creating a sandbox.");
       return;
     }
 
@@ -185,7 +192,7 @@ export default function TemplatesCatalog({
         <div className="panel__header">
           <div>
             <p className="page-kicker">Catalog</p>
-            <h2 className="panel__title">Built-in templates</h2>
+            <h2 className="panel__title">Available templates</h2>
           </div>
         </div>
 
@@ -202,7 +209,7 @@ export default function TemplatesCatalog({
             </thead>
             <tbody>
               {templates.map((template) => {
-                const isLive = template.status === "live";
+                const isLive = isLaunchableTemplate(template);
                 const isSelected = template.slug === selectedTemplateSlug;
                 return (
                   <tr key={template.slug}>
@@ -216,7 +223,11 @@ export default function TemplatesCatalog({
                           isLive ? "active" : "planned"
                         }`}
                       >
-                        {isLive ? "Live" : "Planned"}
+                        {isLive
+                          ? "Live"
+                          : template.latestVersionState === "draft"
+                            ? "Draft"
+                            : "Unavailable"}
                       </span>
                     </td>
                     <td>{summarizeTemplateRuntimes(template)}</td>
@@ -306,35 +317,35 @@ export default function TemplatesCatalog({
                 stores only the key names in the UI, not the secret values.
               </p>
 
-              {selectedTemplate.envHints.length > 0 ? (
+              {selectedTemplate.environmentSchema.length > 0 ? (
                 <div className="template-env-hints">
-                  {selectedTemplate.envHints.map((hint) => (
+                  {selectedTemplate.environmentSchema.map((field) => (
                     <button
-                      key={hint.key}
+                      key={field.key}
                       type="button"
                       className="button button--ghost button--tiny"
                       onClick={() => {
                         if (
                           environmentRows.some(
-                            (row) => row.key.trim().toUpperCase() === hint.key
+                            (row) => row.key.trim().toUpperCase() === field.key
                           )
                         ) {
                           return;
                         }
-                        addEnvironmentRow(hint.key);
+                        addEnvironmentRow(field.key);
                       }}
                       disabled={isPending}
                     >
-                      {hint.key}
+                      {field.key}
                     </button>
                   ))}
                 </div>
               ) : null}
 
-              {selectedTemplate.envHints.length > 0 ? (
+              {selectedTemplate.environmentSchema.length > 0 ? (
                 <div className="table-note">
-                  {selectedTemplate.envHints
-                    .map((hint) => `${hint.key}: ${hint.description}`)
+                  {selectedTemplate.environmentSchema
+                    .map((field) => `${field.key}: ${field.description}`)
                     .join(" ")}
                 </div>
               ) : null}
@@ -424,7 +435,7 @@ export default function TemplatesCatalog({
           </div>
         ) : (
           <div className="empty-state">
-            No live templates are available for creation yet.
+            No published templates are available for creation yet.
           </div>
         )}
       </section>

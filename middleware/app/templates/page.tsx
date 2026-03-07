@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireWebsiteUser } from "@/auth";
-import { listSandcastleTemplateCatalog } from "@/lib/templates";
+import { listTemplateCatalog } from "@/lib/template-service";
 import TemplatesCatalog from "./templates-catalog";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 
 export default async function TemplatesPage() {
   const user = await requireWebsiteUser("/templates");
-  const templates = listSandcastleTemplateCatalog();
+  const templates = await listTemplateCatalog(user.id);
 
   return (
     <div className="page-stack">
@@ -32,11 +32,11 @@ export default async function TemplatesPage() {
             Back to sandboxes
           </Link>
           <Link href="/connector" className="button button--ghost">
-            Open Connector
+            Open Connect
           </Link>
         </div>
       </section>
-      <TemplatesCatalog templates={templates} />
+      <TemplatesCatalog templates={templates.templates} />
     </div>
   );
 }

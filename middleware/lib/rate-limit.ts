@@ -93,7 +93,7 @@ export async function enforcePairingGenerationLimitForRedis(
     maxRequests: PAIRING_GENERATION_LIMIT,
     windowSeconds: PAIRING_GENERATION_WINDOW_SECONDS,
     errorMessage:
-      "Too many new connector codes have been requested for this account. Wait a few minutes and refresh /connector again.",
+      "Too many new connect codes have been requested for this account. Wait a few minutes and refresh /connector again.",
   });
 }
 
@@ -126,7 +126,7 @@ export async function enforcePairingRedemptionLimitsForRedis(
     maxRequests: PAIRING_REDEMPTION_CODE_LIMIT,
     windowSeconds: PAIRING_REDEMPTION_WINDOW_SECONDS,
     errorMessage:
-      "This three-word connector code has been tried too many times. Open /connector and generate a fresh code before trying again.",
+      "This three-word connect code has been tried too many times. Open /connector and generate a fresh code before trying again.",
   });
 }
 

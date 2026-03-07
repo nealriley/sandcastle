@@ -68,6 +68,11 @@ export const TemplateSummarySchema = coda.makeObjectSchema({
       description:
         "Stable template slug, used when creating a new sandbox from this template.",
     },
+    ownerType: {
+      type: coda.ValueType.String,
+      description:
+        "Whether this template is a built-in system template or a user-owned template.",
+    },
     name: {
       type: coda.ValueType.String,
       description: "Human-readable template name.",
@@ -117,7 +122,7 @@ export const SandboxListResultSchema = coda.makeObjectSchema({
       type: coda.ValueType.Array,
       items: TemplateSummarySchema,
       description:
-        "Built-in Sandcastle templates currently available for new sandbox creation.",
+        "Launchable Sandcastle templates currently available for new sandbox creation, including user-owned templates when authenticated.",
     },
     authUrl: {
       type: coda.ValueType.String,
@@ -144,11 +149,28 @@ export const TemplateListResultSchema = coda.makeObjectSchema({
     templates: {
       type: coda.ValueType.Array,
       items: TemplateSummarySchema,
-      description: "Built-in Sandcastle templates available for new sandboxes.",
+      description:
+        "Launchable Sandcastle templates available for new sandboxes, including user-owned templates when authenticated.",
     },
     defaultTemplateSlug: {
       type: coda.ValueType.String,
       description: "Default template slug for standard new sandboxes.",
+    },
+    authUrl: {
+      type: coda.ValueType.String,
+      description:
+        "Website URL where the user signs in with GitHub and gets a three-word Sandcastle Connector code.",
+      codaType: coda.ValueHintType.Url,
+    },
+    errorCode: {
+      type: coda.ValueType.String,
+      description:
+        "Structured auth/setup error code, such as auth_required or invalid_auth_code.",
+    },
+    error: {
+      type: coda.ValueType.String,
+      description:
+        "Error message when template listing could not be completed.",
     },
   },
   displayProperty: "defaultTemplateSlug",
