@@ -84,7 +84,7 @@ test("buildShellCommandRunnerScript includes the configured command and cwd", ()
   const script = buildShellCommandRunnerScript({
     prompt: "",
     cmd: "bash",
-    args: ["-lc", "wc -l /vercel/sandbox/wordcount.txt"],
+    args: ["-lc", 'printf "%s" "$WORDCOUNT_TEXT" | wc -w'],
     cwd: "/vercel/sandbox",
     promptMode: "none",
     promptEnvKey: null,
@@ -92,7 +92,7 @@ test("buildShellCommandRunnerScript includes the configured command and cwd", ()
   });
 
   assert.match(script, /Running shell command/);
-  assert.match(script, /wc -l \/vercel\/sandbox\/wordcount\.txt/);
+  assert.match(script, /WORDCOUNT_TEXT/);
   assert.match(script, /"\/vercel\/sandbox"/);
 });
 
@@ -114,7 +114,7 @@ test("shell-command runner writes stdout as the final result", async () => {
       buildShellCommandRunnerScript({
         prompt: "",
         cmd: "bash",
-        args: ["-lc", "printf '4 wordcount.txt\\n'"],
+        args: ["-lc", "printf '4\\n'"],
         cwd: sandboxRoot,
         promptMode: "none",
         promptEnvKey: null,
@@ -138,7 +138,7 @@ test("shell-command runner writes stdout as the final result", async () => {
     const logText = await fs.readFile(logPath, "utf8");
 
     assert.deepEqual(result, {
-      result: "4 wordcount.txt",
+      result: "4",
       agentSessionId: null,
       source: "response_stream",
     });
@@ -164,12 +164,12 @@ test("shell-command runner can pass the initial prompt through an environment va
     await fs.writeFile(
       scriptPath,
       buildShellCommandRunnerScript({
-        prompt: "/vercel/sandbox/custom.txt",
+        prompt: "alpha beta gamma delta",
         cmd: "bash",
-        args: ["-lc", 'printf "%s" "$WORDCOUNT_TARGET"'],
+        args: ["-lc", 'printf "%s" "$WORDCOUNT_TEXT"'],
         cwd: sandboxRoot,
         promptMode: "env",
-        promptEnvKey: "WORDCOUNT_TARGET",
+        promptEnvKey: "WORDCOUNT_TEXT",
         taskFileId,
         sandboxRoot,
       }),
@@ -189,7 +189,7 @@ test("shell-command runner can pass the initial prompt through an environment va
     };
 
     assert.deepEqual(result, {
-      result: "/vercel/sandbox/custom.txt",
+      result: "alpha beta gamma delta",
       agentSessionId: null,
       source: "response_stream",
     });

@@ -61,7 +61,7 @@ Current built-ins use this in production:
   - optional `ANTHROPIC_API_KEY` override
   - optional website auth env fields
 - `wordcount`
-  - prompt input for target file path
+  - prompt input for raw text to count
   - `WORDCOUNT_METHOD` select
 
 ## Provider Environment Rules
@@ -135,9 +135,11 @@ High-level flow:
 
 - execution strategy: `shell-command`
 - purpose: simple prompt-capable shell-command example
-- bootstrap: writes `/vercel/sandbox/wordcount.txt` and README guidance
-- prompt behavior: prompt is the target file path
+- bootstrap: writes README guidance for the prompt-driven flow
+- prompt behavior: prompt is the raw text to count
 - select behavior: `WORDCOUNT_METHOD` chooses the counting method
+- startup behavior: the command writes the prompt text to a temporary file, then
+  runs the selected counting method against that temp input
 - follow-ups: rejected with `400`
 
 ## Prompt Behavior

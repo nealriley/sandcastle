@@ -26,7 +26,7 @@ test("executionStrategy helpers model shell-command prompt restrictions", () => 
       args: ["-lc", "echo hello"],
       cwd: "/vercel/sandbox",
       promptMode: "env",
-      promptEnvKey: "WORDCOUNT_TARGET",
+      promptEnvKey: "WORDCOUNT_TEXT",
     }),
     true
   );
@@ -37,7 +37,7 @@ test("executionStrategy helpers model shell-command prompt restrictions", () => 
       args: ["-lc", "echo hello"],
       cwd: "/vercel/sandbox",
       promptMode: "env",
-      promptEnvKey: "WORDCOUNT_TARGET",
+      promptEnvKey: "WORDCOUNT_TEXT",
     }),
     false
   );
@@ -64,17 +64,20 @@ test("cloneExecutionStrategy preserves shell-command configuration", () => {
   const strategy = {
     kind: "shell-command" as const,
     cmd: "bash",
-    args: ["-lc", "wc -l /vercel/sandbox/wordcount.txt"],
+    args: ["-lc", 'printf "%s" "$WORDCOUNT_TEXT" | wc -w'],
     cwd: "/vercel/sandbox",
     promptMode: "env" as const,
-    promptEnvKey: "WORDCOUNT_TARGET",
+    promptEnvKey: "WORDCOUNT_TEXT",
   };
 
   const cloned = cloneExecutionStrategy(strategy);
 
   assert.deepEqual(cloned, strategy);
   assert.notEqual(cloned, strategy);
-  assert.equal(formatShellCommand(strategy), "bash -lc wc -l /vercel/sandbox/wordcount.txt");
+  assert.equal(
+    formatShellCommand(strategy),
+    'bash -lc printf "%s" "$WORDCOUNT_TEXT" | wc -w'
+  );
 });
 
 test("applyExecutionStrategyEnvironmentDefaults falls back to platform provider keys", () => {

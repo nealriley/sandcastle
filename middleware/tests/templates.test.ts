@@ -113,13 +113,13 @@ test("resolveTemplatePrompt returns the raw prompt for prompt-capable shell-comm
 
   const prompt = resolveTemplatePrompt(
     template,
-    "/vercel/sandbox/custom.txt",
+    "alpha beta gamma delta",
     {
       INTERNAL_API_TOKEN: "secret-token",
     }
   );
 
-  assert.equal(prompt, "/vercel/sandbox/custom.txt");
+  assert.equal(prompt, "alpha beta gamma delta");
 });
 
 test("resolveTemplateEnvironment preserves explicit values and applies provider defaults", () => {
@@ -211,7 +211,7 @@ test("provider templates bootstrap the contract files and helper script", async 
   ]);
 });
 
-test("wordcount bootstrap writes the sample file for the shell command runner", async () => {
+test("wordcount bootstrap writes the template readme for the shell command runner", async () => {
   const template = getSandcastleTemplate("wordcount");
   assert.ok(template);
 
@@ -221,14 +221,18 @@ test("wordcount bootstrap writes the sample file for the shell command runner", 
     environment: {},
   });
 
-  const fixture = await sandbox.readFileToBuffer({
-    path: "/vercel/sandbox/wordcount.txt",
-  });
   const readme = await sandbox.readFileToBuffer({
     path: "/vercel/sandbox/README.wordcount.md",
   });
 
-  assert.equal(fixture?.toString("utf-8"), "alpha\nbeta\ngamma\ndelta\n");
+  await assert.rejects(
+    sandbox.readFileToBuffer({
+      path: "/vercel/sandbox/wordcount.txt",
+    }),
+    /ENOENT/
+  );
+  assert.match(readme?.toString("utf-8") ?? "", /WORDCOUNT_TEXT/);
   assert.match(readme?.toString("utf-8") ?? "", /WORDCOUNT_METHOD/);
   assert.match(readme?.toString("utf-8") ?? "", /wc-words/);
+  assert.match(readme?.toString("utf-8") ?? "", /alpha beta gamma delta/);
 });

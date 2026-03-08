@@ -114,6 +114,7 @@ export const DEFAULT_TEMPLATE_SLUG = "claude-code";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5";
 const DEFAULT_OPENAI_MODEL = "gpt-5.2-codex";
 const DEFAULT_WORDCOUNT_METHOD = "wc-words";
+const DEFAULT_WORDCOUNT_TEXT = "alpha beta gamma delta";
 
 const CLAUDE_MODEL_OPTIONS: TemplateEnvironmentFieldOption[] = [
   {
@@ -349,25 +350,24 @@ function buildWebsiteDeepDivePrompt(args: {
   ].join("\n");
 }
 
-const WORDCOUNT_TEMPLATE_FILE = "/vercel/sandbox/wordcount.txt";
+const WORDCOUNT_TEMPFILE_GLOB = "/tmp/wordcount-input.*";
 const WORDCOUNT_TEMPLATE_COMMAND = `
-target="\${WORDCOUNT_TARGET:-${WORDCOUNT_TEMPLATE_FILE}}"
+text="\${WORDCOUNT_TEXT:-${DEFAULT_WORDCOUNT_TEXT}}"
 method="\${WORDCOUNT_METHOD:-${DEFAULT_WORDCOUNT_METHOD}}"
+tmpfile="$(mktemp /tmp/wordcount-input.XXXXXX)"
+trap 'rm -f "$tmpfile"' EXIT
 
-if [ ! -f "$target" ]; then
-  echo "Target file not found: $target" >&2
-  exit 2
-fi
+printf '%s' "$text" > "$tmpfile"
 
 case "$method" in
   wc-words)
-    count=$(wc -w < "$target" | tr -d '[:space:]')
+    count=$(wc -w < "$tmpfile" | tr -d '[:space:]')
     ;;
   awk-fields)
-    count=$(awk '{ total += NF } END { print total + 0 }' "$target")
+    count=$(awk '{ total += NF } END { print total + 0 }' "$tmpfile")
     ;;
   grep-tokens)
-    count=$(grep -oE '[^[:space:]]+' "$target" | wc -l | tr -d '[:space:]')
+    count=$({ grep -oE '[^[:space:]]+' "$tmpfile" || true; } | wc -l | tr -d '[:space:]')
     ;;
   *)
     echo "Unsupported WORDCOUNT_METHOD: $method" >&2
@@ -375,17 +375,15 @@ case "$method" in
     ;;
 esac
 
-printf 'Method: %s\nFile: %s\nWord count: %s\n' "$method" "$target" "$count"
+chars=$(wc -m < "$tmpfile" | tr -d '[:space:]')
+
+printf 'Method: %s\nCharacter count: %s\nWord count: %s\n' "$method" "$chars" "$count"
 `.trim();
 
 async function bootstrapWordcountTemplate(
   sandbox: Sandbox
 ): Promise<void> {
   await sandbox.writeFiles([
-    {
-      path: WORDCOUNT_TEMPLATE_FILE,
-      content: Buffer.from(["alpha", "beta", "gamma", "delta", ""].join("\n")),
-    },
     {
       path: "/vercel/sandbox/README.wordcount.md",
       content: Buffer.from(
@@ -394,13 +392,17 @@ async function bootstrapWordcountTemplate(
           "",
           "This template runs a shell command with two config-driven inputs:",
           "",
-          `- Prompt input via \`WORDCOUNT_TARGET\`, defaulting to \`${WORDCOUNT_TEMPLATE_FILE}\``,
+          `- Prompt input via \`WORDCOUNT_TEXT\`, defaulting to \`${DEFAULT_WORDCOUNT_TEXT}\``,
           `- Select input via \`WORDCOUNT_METHOD\`, defaulting to \`${DEFAULT_WORDCOUNT_METHOD}\``,
           "",
           "Available methods:",
           "- wc-words",
           "- awk-fields",
           "- grep-tokens",
+          "",
+          "The startup command writes the prompt text to a temporary file and runs the selected counting method against that input.",
+          "",
+          `Temporary input files match \`${WORDCOUNT_TEMPFILE_GLOB}\` for the life of the command only.`,
           "",
           "It exists to validate prompt-capable shell-command execution and template-config selects end to end.",
           "",
@@ -907,9 +909,9 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
     name: "Wordcount",
     status: "live",
     summary:
-      "A shell-command template that counts words in a target sandbox file using a selectable counting method.",
+      "A shell-command template that counts words in prompt text using a selectable counting method.",
     purpose:
-      "Exercise prompt-capable shell-command execution and config-driven select inputs against a concrete file path without involving an AI agent.",
+      "Exercise prompt-capable shell-command execution and config-driven select inputs against raw text without involving an AI agent.",
     source: {
       kind: "snapshot",
       snapshotEnvVar: "BASE_SNAPSHOT_ID",
@@ -923,15 +925,15 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
       args: ["-lc", WORDCOUNT_TEMPLATE_COMMAND],
       cwd: "/vercel/sandbox",
       promptMode: "env",
-      promptEnvKey: "WORDCOUNT_TARGET",
+      promptEnvKey: "WORDCOUNT_TEXT",
     },
     launchLabel: "Run wordcount",
     ports: [],
     timeoutMs: ms("10m"),
     vcpus: 2,
     promptPlaceholder:
-      `Optional path to a file inside the sandbox. Defaults to ${WORDCOUNT_TEMPLATE_FILE}.`,
-    defaultPrompt: WORDCOUNT_TEMPLATE_FILE,
+      `Enter the text to count. Defaults to "${DEFAULT_WORDCOUNT_TEXT}".`,
+    defaultPrompt: DEFAULT_WORDCOUNT_TEXT,
     envHints: [
       {
         key: "WORDCOUNT_METHOD",

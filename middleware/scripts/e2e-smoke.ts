@@ -253,7 +253,7 @@ async function main() {
     assert.ok(template, "Expected wordcount template to exist");
     const baseRequest = new Request(`${BASE_URL}/smoke/e2e`);
     const wordcountStart = await createOwnedSandboxTask(baseRequest as never, {
-      prompt: "/vercel/sandbox/wordcount.txt",
+      prompt: "alpha beta gamma delta",
       runtime: "node24",
       template,
       environment: {
@@ -274,10 +274,7 @@ async function main() {
     );
     assert.equal(wordcountDone.status, "complete");
     assert.match(wordcountDone.result ?? "", /Method:\s*awk-fields/i);
-    assert.match(
-      wordcountDone.result ?? "",
-      /File:\s*\/vercel\/sandbox\/wordcount\.txt/i
-    );
+    assert.match(wordcountDone.result ?? "", /Character count:\s*22/i);
     assert.match(wordcountDone.result ?? "", /Word count:\s*4/i);
     managed[managed.length - 1].sessionId = wordcountDone.sessionId;
     console.log(

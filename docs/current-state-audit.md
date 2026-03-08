@@ -73,6 +73,12 @@ Current launch-form features:
 - default values
 - stored-env prefill when keys match
 
+Current `wordcount` behavior:
+
+- prompt input is raw text, not a file path
+- startup command writes that text to a temporary file
+- selected method then counts words from that temp input
+
 ## Audit Findings
 
 ### Resolved in this batch
