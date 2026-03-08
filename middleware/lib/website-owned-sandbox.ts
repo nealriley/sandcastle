@@ -21,7 +21,20 @@ export type WebsiteOwnedSandboxLookup =
 export async function requireWebsiteOwnedSandbox(
   sessionKey: string
 ): Promise<WebsiteOwnedSandboxLookup> {
-  const user = await getWebsiteUser();
+  let user;
+  try {
+    user = await getWebsiteUser();
+  } catch (error) {
+    console.error("Failed to read website user for sandbox ownership:", error);
+    return {
+      ok: false,
+      response: Response.json(
+        { error: "Failed to verify website session." },
+        { status: 500 }
+      ),
+    };
+  }
+
   if (!user) {
     return {
       ok: false,

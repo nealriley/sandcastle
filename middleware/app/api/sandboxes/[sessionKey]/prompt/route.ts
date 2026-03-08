@@ -11,6 +11,8 @@ import { requireWebsiteOwnedSandbox } from "@/lib/website-owned-sandbox";
 
 const MAX_PROMPT_LENGTH = 100_000;
 
+export const runtime = "nodejs";
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ sessionKey: string }> }

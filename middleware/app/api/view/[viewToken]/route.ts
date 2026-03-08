@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Sandbox } from "@vercel/sandbox";
 import { getWebsiteUser } from "@/auth";
 import { buildSessionView, readSessionState } from "@/lib/session-state";
@@ -14,6 +14,9 @@ import type { ExecutionStrategy } from "@/lib/template-service-types";
 import { decodeViewToken } from "@/lib/tokens";
 import type { SessionToken, SessionViewResponse } from "@/lib/types";
 import { buildSandboxUrl } from "@/lib/url";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -71,26 +74,29 @@ export async function GET(
   { params }: { params: Promise<{ viewToken: string }> }
 ) {
   const { viewToken } = await params;
-  const user = await getWebsiteUser();
   let sandboxIdForFallback = "";
   let sessionKeyForFallback = "";
-
-  if (!user) {
-    logSessionDiagnostic({
-      event: "view_route_unauthenticated",
-      level: "warn",
-      data: {
-        httpStatus: 401,
-        viewTokenTail: viewToken.slice(-8),
-      },
-    });
-    return Response.json(
-      { error: "Sign in is required to view this sandbox." },
-      { status: 401 }
-    );
-  }
+  let viewerUserId: string | null = null;
 
   try {
+    const user = await getWebsiteUser();
+    viewerUserId = user?.id ?? null;
+
+    if (!user) {
+      logSessionDiagnostic({
+        event: "view_route_unauthenticated",
+        level: "warn",
+        data: {
+          httpStatus: 401,
+          viewTokenTail: viewToken.slice(-8),
+        },
+      });
+      return NextResponse.json(
+        { error: "Sign in is required to view this sandbox." },
+        { status: 401 }
+      );
+    }
+
     const viewData = decodeViewToken(viewToken);
     sandboxIdForFallback = viewData.sandboxId;
     sessionKeyForFallback = viewData.sessionKey;
@@ -113,7 +119,7 @@ export async function GET(
           record: summarizeOwnedSessionRecordForDiagnostics(record),
         },
       });
-      return Response.json(
+      return NextResponse.json(
         { error: "Sign in is required to view this sandbox." },
         { status: 401 }
       );
@@ -132,7 +138,7 @@ export async function GET(
           record: summarizeOwnedSessionRecordForDiagnostics(record),
         },
       });
-      return Response.json(
+      return NextResponse.json(
         { error: "This sandbox belongs to a different signed-in user." },
         { status: 403 }
       );
@@ -152,7 +158,7 @@ export async function GET(
           record: summarizeOwnedSessionRecordForDiagnostics(record),
         },
       });
-      return Response.json(
+      return NextResponse.json(
         stoppedView(req, viewToken, viewData.sandboxId, {
           sessionKey: viewData.sessionKey,
           templateSlug: record?.templateSlug ?? null,
@@ -204,7 +210,7 @@ export async function GET(
       });
     }
 
-    return Response.json(response, {
+    return NextResponse.json(response, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
@@ -222,12 +228,12 @@ export async function GET(
           httpStatus: 200,
           sandboxId: sandboxIdForFallback,
           sessionKey: sessionKeyForFallback,
-          viewerUserId: user.id,
+          viewerUserId,
           error: error.message,
           record: summarizeOwnedSessionRecordForDiagnostics(record),
         },
       });
-      return Response.json(
+      return NextResponse.json(
         stoppedView(req, viewToken, sandboxIdForFallback, {
           sessionKey: sessionKeyForFallback,
           templateSlug: record?.templateSlug ?? null,
@@ -248,12 +254,12 @@ export async function GET(
         httpStatus: 500,
         sandboxId: sandboxIdForFallback,
         sessionKey: sessionKeyForFallback,
-        viewerUserId: user.id,
+        viewerUserId,
         error: error instanceof Error ? error.message : String(error),
       },
     });
     console.error("Failed to read public sandbox view:", error);
-    return Response.json(
+    return NextResponse.json(
       {
         error:
           error instanceof Error

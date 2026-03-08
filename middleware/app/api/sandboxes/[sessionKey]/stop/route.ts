@@ -3,6 +3,8 @@ import { Sandbox } from "@vercel/sandbox";
 import { touchOwnedSession } from "@/lib/session-ownership";
 import { requireWebsiteOwnedSandbox } from "@/lib/website-owned-sandbox";
 
+export const runtime = "nodejs";
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ sessionKey: string }> }
