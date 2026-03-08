@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { getWebsiteUser } from "@/auth";
 import {
   McpOAuthError,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/mcp-auth";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function buildConsentPageUrl(req: Request): string {
   return new URL("/connect/mcp/authorize", req.url).toString();
@@ -39,7 +41,7 @@ export async function GET(req: Request) {
   const current = new URL(req.url);
   const target = new URL(buildConsentPageUrl(req));
   target.search = current.search;
-  return Response.redirect(target, 302);
+  return NextResponse.redirect(target, 302);
 }
 
 export async function POST(req: Request) {
@@ -61,10 +63,10 @@ export async function POST(req: Request) {
     if (error instanceof McpOAuthError) {
       const redirectTarget = buildMcpAuthorizationErrorRedirect(error);
       if (redirectTarget) {
-        return Response.redirect(redirectTarget, 302);
+        return NextResponse.redirect(redirectTarget, 302);
       }
 
-      return Response.redirect(buildConsentPageUrl(req), 302);
+      return NextResponse.redirect(buildConsentPageUrl(req), 302);
     }
 
     throw error;
@@ -72,7 +74,7 @@ export async function POST(req: Request) {
 
   const user = await getWebsiteUser();
   if (!user) {
-    return Response.redirect(buildSignInUrl(req, formData), 302);
+    return NextResponse.redirect(buildSignInUrl(req, formData), 302);
   }
 
   const decision =
@@ -81,7 +83,7 @@ export async function POST(req: Request) {
       : "deny";
 
   if (decision !== "approve") {
-    return Response.redirect(
+    return NextResponse.redirect(
       buildMcpAuthorizationRedirect(authorizationRequest.redirectUri, {
         error: "access_denied",
         error_description: "The user denied the authorization request.",
@@ -92,7 +94,7 @@ export async function POST(req: Request) {
   }
 
   const code = await issueMcpAuthorizationCode(authorizationRequest, user);
-  return Response.redirect(
+  return NextResponse.redirect(
     buildMcpAuthorizationRedirect(authorizationRequest.redirectUri, {
       code,
       state: authorizationRequest.state,

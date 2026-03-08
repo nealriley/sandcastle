@@ -1,6 +1,8 @@
+import { NextResponse } from "next/server";
 import { revokeMcpAccessToken } from "@/lib/mcp-auth";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const formData = await req.formData();
@@ -10,5 +12,5 @@ export async function POST(req: Request) {
     await revokeMcpAccessToken(token.trim());
   }
 
-  return new Response(null, { status: 200 });
+  return new NextResponse(null, { status: 200 });
 }
