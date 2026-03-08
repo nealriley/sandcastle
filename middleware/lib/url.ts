@@ -25,7 +25,7 @@ export function buildSandboxUrl(
 }
 
 export function buildConnectorUrl(req: Request | NextRequest): string {
-  return `${getBaseUrl(req)}/connector`;
+  return `${getBaseUrl(req)}/connect/shgo`;
 }
 
 export function buildSandboxesUrl(req: Request | NextRequest): string {
@@ -42,6 +42,28 @@ export function buildTemplateValidationUrl(
   req: Request | NextRequest
 ): string {
   return `${getBaseUrl(req)}/api/template-validation`;
+}
+
+export function buildMcpServerUrl(req: Request | NextRequest): string {
+  return `${getBaseUrl(req)}/api/mcp`;
+}
+
+export function buildMcpProtectedResourceMetadataUrl(
+  req: Request | NextRequest
+): string {
+  return `${getBaseUrl(req)}/.well-known/oauth-protected-resource/api/mcp`;
+}
+
+export function buildMcpAuthorizationServerUrl(
+  req: Request | NextRequest
+): string {
+  return `${getBaseUrl(req)}/api/mcp/oauth`;
+}
+
+export function buildMcpAuthorizationMetadataUrl(
+  req: Request | NextRequest
+): string {
+  return `${getBaseUrl(req)}/.well-known/oauth-authorization-server/api/mcp/oauth`;
 }
 
 export const buildConnectUrl = buildConnectorUrl;

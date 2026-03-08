@@ -7,10 +7,11 @@ Date: March 8, 2026
 
 Sandcastle is a sandbox control plane for long-running coding and automation
 work. It has two user-facing surfaces operating on the same owned-sandbox
-records:
+records, plus a remote MCP surface:
 
 - the Sandcastle website
 - the SHGO / Coda Pack integration
+- the remote MCP server
 
 The control plane is intentionally async. Requests return quickly with
 task/session metadata while the actual work continues inside a Vercel Sandbox.
@@ -25,6 +26,8 @@ Current signed-in website surface:
 - `/marketplace`
 - `/environment`
 - `/connect`
+- `/connect/[connectorSlug]`
+- `/connect/mcp/authorize`
 - `/profile`
 - `/sessions/[viewToken]`
 - `/sandboxes/[viewToken]`
@@ -37,7 +40,9 @@ Current capabilities:
 - stop active sessions
 - inspect console output and task history
 - store reusable environment variables
+- browse connector cards and per-connector setup details
 - mint connector codes for SHGO
+- approve OAuth access for remote MCP clients
 
 ### SHGO / Pack
 
@@ -52,11 +57,22 @@ The Pack is the chat control surface for:
 - reading files and previews
 - stopping a sandbox
 
+### MCP
+
+Current MCP surface:
+
+- Streamable HTTP endpoint at `/api/mcp`
+- protected-resource metadata at `/.well-known/oauth-protected-resource/api/mcp`
+- authorization server metadata at `/.well-known/oauth-authorization-server/api/mcp/oauth`
+- owner-scoped tools for template discovery, sandbox launch, sandbox listing,
+  sandbox inspection, file reads, and stopping sandboxes
+
 ## Middleware Responsibilities
 
 The Next.js middleware app handles:
 
 - GitHub auth and owner enforcement
+- connector registry and connector-specific setup pages
 - template resolution and launch validation
 - sandbox creation and bootstrap
 - execution-strategy runner dispatch
@@ -64,6 +80,7 @@ The Next.js middleware app handles:
 - preview and file proxying
 - signed control/view tokens
 - Redis-backed ownership, pairing, and per-user environment storage
+- Redis-backed MCP OAuth clients, authorization codes, and access tokens
 - Anthropic proxying for Claude-based sandboxes
 
 ## Template and Runner Model
@@ -112,6 +129,14 @@ Strategy-specific runners provide:
   code
 - pairing codes are short-lived, single-use for redemption, and stored in Redis
 
+### MCP OAuth
+
+- dynamic public-client registration
+- browser authorization step that reuses website GitHub auth
+- short-lived authorization codes with PKCE
+- opaque bearer access tokens scoped to the Sandcastle MCP resource and owning
+  website user
+
 ### Token model
 
 Current signed tokens:
@@ -156,6 +181,7 @@ pnpm smoke:e2e
 
 Current smoke behavior:
 
+- MCP discovery metadata is verified first
 - `claude-code` and `wordcount` are always exercised
 - the Codex smoke path runs when `OPENAI_API_KEY` is configured
 - `SANDCASTLE_SMOKE_SKIP_CODEX=1` disables the Codex smoke path explicitly

@@ -54,7 +54,7 @@ export default function DashboardSessions({ rows }: { rows: DashboardRow[] }) {
     return (
       <EmptyState>
         No sessions yet. <Link href="/marketplace">Launch your first agent</Link> or{" "}
-        <Link href="/connect">connect via SuperHuman Go</Link>.
+        <Link href="/connect">connect an external client</Link>.
       </EmptyState>
     );
   }

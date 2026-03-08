@@ -6,7 +6,7 @@ Date: March 8, 2026
 
 The current repo implements a stable Sandcastle baseline with:
 
-- two user-facing surfaces: website plus SHGO / Coda Pack
+- three user-facing surfaces: website, SHGO / Coda Pack, and remote MCP
 - four live built-in templates
 - three live execution strategies
 - owner-authenticated browser flows
@@ -30,7 +30,11 @@ Current signed-in routes and capabilities:
 - `/environment`
   - create, update, reveal, and delete saved launch-time environment values
 - `/connect`
-  - mint three-word connector codes for SHGO
+  - browse the available connectors
+- `/connect/[connectorSlug]`
+  - view setup details for SHGO and MCP
+- `/connect/mcp/authorize`
+  - approve OAuth access for an MCP client
 - `/profile`
   - inspect GitHub identity and Sandcastle account metadata
 - `/sessions/[viewToken]` and `/sandboxes/[viewToken]`
@@ -49,6 +53,20 @@ Current Pack capabilities:
 - fetch preview URLs
 - fetch task/session status
 - stop a sandbox
+
+### MCP
+
+Current MCP capabilities:
+
+- protected-resource and authorization metadata discovery
+- dynamic public-client registration
+- browser-based GitHub-backed OAuth approval
+- list templates
+- launch an owned sandbox
+- list owned sandboxes
+- inspect sandbox state, previews, tasks, and logs
+- read sandbox files
+- stop an owned sandbox
 
 ### Template System
 
@@ -87,6 +105,8 @@ Current `wordcount` behavior:
 - stale smoke expectations for `wordcount`
 - stale top-level docs and backlog notes
 - release workflow is now documented for both middleware and Pack surfaces
+- connector management is now a generalized product surface
+- remote MCP discovery, auth, and owner-scoped tools are now implemented
 
 ### Remaining gaps
 

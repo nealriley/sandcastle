@@ -10,6 +10,19 @@ import type {
   TaskResponse,
 } from "../lib/types.js";
 
+type McpProtectedResourceMetadata = {
+  resource?: string;
+  authorization_servers?: string[];
+};
+
+type McpAuthorizationMetadata = {
+  issuer?: string;
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  registration_endpoint?: string;
+  scopes_supported?: string[];
+};
+
 const BASE_URL = (
   process.env.SANDCASTLE_BASE_URL ||
   process.env.PUBLIC_APP_URL ||
@@ -182,7 +195,31 @@ async function main() {
   let codexStart: TaskResponse | null = null;
 
   try {
-    console.log("1. Minting connector code and listing owned sandboxes...");
+    console.log("1. Verifying MCP discovery endpoints...");
+    const protectedResource = await getJson<McpProtectedResourceMetadata>(
+      "/.well-known/oauth-protected-resource/api/mcp",
+      [200]
+    );
+    const authorizationMetadata = await getJson<McpAuthorizationMetadata>(
+      "/.well-known/oauth-authorization-server/api/mcp/oauth",
+      [200]
+    );
+    assert.equal(protectedResource.resource, `${BASE_URL}/api/mcp`);
+    assert.deepEqual(protectedResource.authorization_servers, [
+      `${BASE_URL}/api/mcp/oauth`,
+    ]);
+    assert.equal(authorizationMetadata.issuer, `${BASE_URL}/api/mcp/oauth`);
+    assert.equal(
+      authorizationMetadata.authorization_endpoint,
+      `${BASE_URL}/api/mcp/oauth/authorize`
+    );
+    assert.ok(
+      authorizationMetadata.scopes_supported?.includes("mcp"),
+      "Expected MCP auth metadata to advertise the mcp scope."
+    );
+    console.log("   PASS: MCP protected resource and authorization metadata are live.");
+
+    console.log("\n2. Minting connector code and listing owned sandboxes...");
     const firstCode = (await getOrCreatePairingCode(user)).code;
     const initialList = await postJson<SandboxListResponse>("/api/sandboxes", {
       body: { authCode: firstCode, includeStopped: true },
@@ -193,7 +230,7 @@ async function main() {
     console.log("   PASS: Fresh paired user has no owned sandboxes.");
 
     console.log(
-      "\n2. Starting a Claude Code sandbox through the Pack-compatible control-plane route..."
+      "\n3. Starting a Claude Code sandbox through the Pack-compatible control-plane route..."
     );
     const claudeStart = await postJson<TaskResponse>("/api/sessions", {
       headers: { "X-Agent-Key": AGENT_API_KEY },
@@ -218,7 +255,7 @@ async function main() {
 
     if (includeCodex) {
       console.log(
-        "\n3. Starting a Codex sandbox through the Pack-compatible control-plane route..."
+        "\n4. Starting a Codex sandbox through the Pack-compatible control-plane route..."
       );
       codexStart = await postJson<TaskResponse>("/api/sessions", {
         headers: { "X-Agent-Key": AGENT_API_KEY },
@@ -242,12 +279,12 @@ async function main() {
       console.log("   PASS: Codex sandbox completed the initial task.");
     } else {
       console.log(
-        "\n3. Skipping Codex smoke because OPENAI_API_KEY is not configured locally or SANDCASTLE_SMOKE_SKIP_CODEX=1."
+        "\n4. Skipping Codex smoke because OPENAI_API_KEY is not configured locally or SANDCASTLE_SMOKE_SKIP_CODEX=1."
       );
     }
 
     console.log(
-      "\n4. Starting a wordcount shell-command sandbox through the shared creation path..."
+      "\n5. Starting a wordcount shell-command sandbox through the shared creation path..."
     );
     const template = getCreatableSandcastleTemplate("wordcount");
     assert.ok(template, "Expected wordcount template to exist");
@@ -282,7 +319,7 @@ async function main() {
     );
 
     console.log(
-      "\n5. Continuing the Claude Code sandbox with the token-scoped follow-up route..."
+      "\n6. Continuing the Claude Code sandbox with the token-scoped follow-up route..."
     );
     const claudeFollowUp = await postJson<TaskResponse>(
       `/api/sessions/${encodeURIComponent(claudeDone.sessionId)}/prompt`,
@@ -303,7 +340,7 @@ async function main() {
     managed[0].sessionId = claudeFollowUpDone.sessionId;
     console.log("   PASS: Token-scoped follow-up succeeded.");
 
-    console.log("\n6. Listing owned sandboxes again and checking template metadata...");
+    console.log("\n7. Listing owned sandboxes again and checking template metadata...");
     const secondCode = (await getOrCreatePairingCode(user)).code;
     const listed = await postJson<SandboxListResponse>("/api/sandboxes", {
       body: { authCode: secondCode, includeStopped: true },
@@ -330,7 +367,7 @@ async function main() {
     );
     console.log("   PASS: Owned sandbox discovery returned all smoke sandboxes.");
 
-    console.log("\n7. Verifying shell-command sandboxes reject follow-up prompts...");
+    console.log("\n8. Verifying shell-command sandboxes reject follow-up prompts...");
     const resumed = await postJson<{ error?: string }>("/api/sandboxes/resume", {
       body: {
         authCode: secondCode,
@@ -344,7 +381,7 @@ async function main() {
 
     console.log("\n=== Sandcastle E2E smoke test passed ===");
   } finally {
-    console.log("\n8. Cleaning up smoke sandboxes...");
+    console.log("\n9. Cleaning up smoke sandboxes...");
     await stopManagedSandboxes(managed);
   }
 }

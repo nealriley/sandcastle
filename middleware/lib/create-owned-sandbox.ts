@@ -110,7 +110,7 @@ function resolveTemplateSandboxCreateParams(args: {
 }
 
 export async function createOwnedSandboxTask(
-  req: NextRequest,
+  req: Request | NextRequest,
   args: {
     prompt: string;
     runtime: RuntimeName;

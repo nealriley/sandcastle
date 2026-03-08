@@ -24,7 +24,7 @@ export default function SiteNav(props: {
     { href: "/dashboard", label: "Dashboard" },
     { href: "/marketplace", label: "Marketplace" },
     { href: "/environment", label: "Environment" },
-    { href: "/connect", label: "Connect" },
+    { href: "/connect", label: "Connectors" },
     { href: "/profile", label: "Profile" },
   ];
 

@@ -25,7 +25,7 @@ Sandcastle has two user-facing entry points:
    - watch console output, preview URLs, and task history
    - send follow-up prompts or stop active sandboxes
    - store reusable launch-time environment variables
-   - mint three-word connector codes for SHGO
+   - manage connector access for SHGO and remote MCP clients
 
 2. SHGO / Coda Pack
    - create a sandbox from chat
@@ -33,6 +33,12 @@ Sandcastle has two user-facing entry points:
    - resume a sandbox by id
    - continue work in the selected sandbox
    - read files, previews, logs, and status
+
+3. Remote MCP clients
+   - connect to `/api/mcp` over Streamable HTTP
+   - discover auth metadata from the standard well-known routes
+   - authorize with GitHub-backed OAuth in the browser
+   - list templates, launch sandboxes, inspect owned sandboxes, read files, and stop sandboxes
 
 The system is intentionally async. Creation and follow-up requests return fast
 with task/session metadata while the long-running work continues inside a Vercel
@@ -81,6 +87,7 @@ pnpm smoke:e2e
 
 Notes:
 
+- `pnpm smoke:e2e` verifies MCP discovery metadata before the SHGO and sandbox lifecycle checks.
 - `pnpm smoke:e2e` always covers `claude-code` and `wordcount`.
 - The Codex smoke path runs automatically when `OPENAI_API_KEY` is configured.
 - Set `SANDCASTLE_SMOKE_SKIP_CODEX=1` to skip the Codex smoke path explicitly.

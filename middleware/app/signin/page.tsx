@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Sign In — Sandcastle",
   description:
-    "Sign in with GitHub to own sandboxes, launch templates, and connect SuperHuman Go to Sandcastle.",
+    "Sign in with GitHub to own sandboxes, launch templates, and authorize Sandcastle connectors.",
 };
 
 function resolveCallbackUrl(callbackUrl?: string): string {

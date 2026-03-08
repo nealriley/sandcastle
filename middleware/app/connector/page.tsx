@@ -3,5 +3,5 @@ import { redirect } from "next/navigation";
 export const dynamic = "force-dynamic";
 
 export default async function ConnectorPage() {
-  redirect("/connect");
+  redirect("/connect/shgo");
 }
