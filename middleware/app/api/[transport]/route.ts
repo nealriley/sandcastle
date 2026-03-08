@@ -2,15 +2,22 @@ import { z } from "zod";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { getMcpOwnerFromAuth, getMcpSandboxView, launchMcpSandbox, listMcpSandboxes, listMcpTemplates, readMcpSandboxFile, stopMcpSandbox } from "@/lib/mcp-service";
 import { verifyMcpAccessToken } from "@/lib/mcp-auth";
+import {
+  buildMcpLaunchPresentation,
+  buildMcpSandboxPresentation,
+} from "@/lib/mcp-presentation";
 
 export const dynamic = "force-dynamic";
 
-function jsonToolResult(payload: Record<string, unknown>) {
+function jsonToolResult(
+  payload: Record<string, unknown>,
+  summaryText?: string
+) {
   return {
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify(payload, null, 2),
+        text: summaryText ?? JSON.stringify(payload, null, 2),
       },
     ],
     structuredContent: payload,
@@ -81,7 +88,14 @@ const mcpHandler = createMcpHandler(
             owner,
             includeStopped ?? true
           );
-          return jsonToolResult({ sandboxes });
+          return jsonToolResult({
+            sandboxes: sandboxes.map((sandbox) => ({
+              ...sandbox,
+              followAlongUrl: sandbox.sandboxUrl,
+            })),
+            note:
+              "Use followAlongUrl or sandboxUrl for the Sandcastle website. sandboxId is an internal identifier, not a browser URL.",
+          });
         } catch (error) {
           return toolError(error);
         }
@@ -110,7 +124,8 @@ const mcpHandler = createMcpHandler(
             runtime,
             environment,
           });
-          return jsonToolResult({ task });
+          const presentation = buildMcpLaunchPresentation(task);
+          return jsonToolResult(presentation.payload, presentation.summary);
         } catch (error) {
           return toolError(error);
         }
@@ -131,7 +146,8 @@ const mcpHandler = createMcpHandler(
           const owner = getMcpOwnerFromAuth(extra);
           const request = getToolRequest(extra);
           const sandbox = await getMcpSandboxView(request, owner, sandboxId);
-          return jsonToolResult({ sandbox });
+          const presentation = buildMcpSandboxPresentation(sandbox);
+          return jsonToolResult(presentation.payload, presentation.summary);
         } catch (error) {
           return toolError(error);
         }
