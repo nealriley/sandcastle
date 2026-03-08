@@ -154,6 +154,12 @@ pnpm build
 pnpm smoke:e2e
 ```
 
+Current smoke behavior:
+
+- `claude-code` and `wordcount` are always exercised
+- the Codex smoke path runs when `OPENAI_API_KEY` is configured
+- `SANDCASTLE_SMOKE_SKIP_CODEX=1` disables the Codex smoke path explicitly
+
 Current health checks cover:
 
 - agent auth
@@ -164,3 +170,19 @@ Current health checks cover:
 - website auth
 - template registry
 - template-service auth
+
+## Release Mechanics
+
+Middleware and Pack ship separately.
+
+- Middleware:
+  - deploy from `projects/ai-coding-agent/middleware`
+  - current production path is `vercel deploy --prod --yes`
+- Pack:
+  - validate/build from `projects/ai-coding-agent`
+  - upload and release separately with the Coda CLI
+  - `coda release` requires a clean committed working tree
+
+That means a green middleware deploy does not automatically publish new Pack
+behavior, and a Pack upload alone does not make a version installable until the
+release step succeeds.

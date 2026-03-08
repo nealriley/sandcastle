@@ -86,6 +86,7 @@ Current `wordcount` behavior:
 - stale Pack-facing template names and default template slug
 - stale smoke expectations for `wordcount`
 - stale top-level docs and backlog notes
+- release workflow is now documented for both middleware and Pack surfaces
 
 ### Remaining gaps
 

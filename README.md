@@ -79,6 +79,12 @@ pnpm build
 pnpm smoke:e2e
 ```
 
+Notes:
+
+- `pnpm smoke:e2e` always covers `claude-code` and `wordcount`.
+- The Codex smoke path runs automatically when `OPENAI_API_KEY` is configured.
+- Set `SANDCASTLE_SMOKE_SKIP_CODEX=1` to skip the Codex smoke path explicitly.
+
 ## Local Setup
 
 - Copy [`middleware/.env.example`](middleware/.env.example) to
@@ -114,3 +120,20 @@ Middleware side:
   config, template registry integrity, and template-service auth.
 - Browser sandbox actions are owner-authenticated server routes. The website
   never receives mutable sandbox bearer tokens.
+
+## Release Workflow
+
+Current release order:
+
+1. verify locally
+   - Pack: `npm test`, `coda validate`, `coda build`
+   - Middleware: `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm smoke:e2e`
+2. push the git commit to `origin/main`
+3. deploy middleware with `vercel deploy --prod --yes` from `middleware/`
+4. upload/release the Pack separately from the repo root
+
+Important operational note:
+
+- `coda release` requires a clean committed working tree.
+- A local Pack upload can succeed before release, but the final release step
+  will still refuse to publish from a dirty repo.

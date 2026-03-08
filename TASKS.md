@@ -26,9 +26,9 @@ Last updated: March 8, 2026
 
 ### Documentation and Audit
 
-- [ ] Keep repo docs aligned with the current shipped product
-- [ ] Keep Pack vocabulary aligned with the current template catalog
-- [ ] Record the current audited system state in `docs/current-state-audit.md`
+- [x] Keep repo docs aligned with the current shipped product
+- [x] Keep Pack vocabulary aligned with the current template catalog
+- [x] Record the current audited system state in `docs/current-state-audit.md`
 
 ### Verification and Coverage
 
@@ -41,7 +41,7 @@ Last updated: March 8, 2026
 
 - [ ] Remove or archive dead references to retired built-ins
 - [ ] Decide whether old webpage-inspector template assets should remain as dormant code or be removed
-- [ ] Keep deployment and release docs aligned between middleware and Pack surfaces
+- [x] Keep deployment and release docs aligned between middleware and Pack surfaces
 
 ## Later
 
