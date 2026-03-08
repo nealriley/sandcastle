@@ -33,6 +33,8 @@ Current signed-in routes and capabilities:
   - browse the available connectors
 - `/connect/[connectorSlug]`
   - view setup details for SHGO and MCP
+  - `/connect/mcp` now includes client-specific setup guides for Claude Code,
+    Claude web, Codex, and ChatGPT
 - `/connect/mcp/authorize`
   - approve OAuth access for an MCP client
 - `/profile`

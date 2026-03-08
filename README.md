@@ -39,6 +39,8 @@ Sandcastle has two user-facing entry points:
    - discover auth metadata from the standard well-known routes
    - authorize with GitHub-backed OAuth in the browser
    - list templates, launch sandboxes, inspect owned sandboxes, read files, and stop sandboxes
+   - use `/connect/mcp` for client-specific setup instructions for Claude Code,
+     Claude web, Codex, and ChatGPT
 
 The system is intentionally async. Creation and follow-up requests return fast
 with task/session metadata while the long-running work continues inside a Vercel
