@@ -42,8 +42,9 @@ test("touchOwnedSession stores and refreshes ownership metadata while preserving
     updatedAt: 2_000,
     latestPrompt: "Build app",
     status: "active",
-    templateSlug: "standard",
-    templateName: "Standard",
+    templateSlug: "claude-code",
+    templateName: "Claude Code",
+    executionStrategyKind: "claude-agent",
   });
 
   const second = await touchOwnedSessionInRedis(fakeRedis, {
@@ -62,8 +63,9 @@ test("touchOwnedSession stores and refreshes ownership metadata while preserving
   assert.equal(second.latestPrompt, "Add auth");
   assert.equal(second.status, "stopped");
   assert.equal(second.runtime, "node24");
-  assert.equal(second.templateSlug, "standard");
-  assert.equal(second.templateName, "Standard");
+  assert.equal(second.templateSlug, "claude-code");
+  assert.equal(second.templateName, "Claude Code");
+  assert.equal(second.executionStrategyKind, "claude-agent");
   assert.deepEqual(second.ports, [3000, 5173]);
 
   const stored = await getOwnedSessionInRedis(fakeRedis, "session_123");

@@ -23,7 +23,9 @@ import {
   assertFollowUpTokenConfiguration,
   decodeSessionToken,
 } from "@/lib/tokens";
+import { executionStrategyAllowsFollowUps } from "@/lib/execution-strategy";
 import { startSandboxFollowUpTask } from "@/lib/sandbox-follow-up";
+import type { ExecutionStrategy } from "@/lib/template-service-types";
 
 export async function POST(
   req: NextRequest,
@@ -73,6 +75,19 @@ export async function POST(
 
   try {
     const record = await getOwnedSession(sessionData.sessionKey);
+    const followUpStrategy: ExecutionStrategy = {
+      kind:
+        record?.executionStrategyKind === "codex-agent"
+          ? "codex-agent"
+          : "claude-agent",
+    };
+    if (!executionStrategyAllowsFollowUps(record?.executionStrategyKind ?? null)) {
+      return Response.json(
+        { error: "This template does not accept follow-up prompts." },
+        { status: 400 }
+      );
+    }
+
     const sandbox = await Sandbox.get({ sandboxId: sessionData.sandboxId });
     const state = await reconcileSessionState(sandbox, sessionData);
 
@@ -91,7 +106,12 @@ export async function POST(
       });
     }
 
-    const response = await startSandboxFollowUpTask(req, sessionData, prompt);
+    const response = await startSandboxFollowUpTask(
+      req,
+      sessionData,
+      prompt,
+      followUpStrategy
+    );
     return Response.json(response, { status: 202 });
   } catch (error) {
     if (

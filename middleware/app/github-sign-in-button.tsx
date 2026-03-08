@@ -3,7 +3,7 @@
 import { signIn } from "next-auth/react";
 
 export default function GitHubSignInButton({
-  callbackUrl = "/sandboxes",
+  callbackUrl = "/dashboard",
   className,
   children,
 }: {

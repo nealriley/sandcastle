@@ -1,0 +1,79 @@
+:root {
+  /* Colors — warm neutrals + vibrant accent */
+  --bg: #fafbfc;
+  --surface: #ffffff;
+  --surface-muted: #f8f9fb;
+  --surface-strong: #eef2ff;
+  --border: #e5e7eb;
+  --border-strong: #cbd5e1;
+  --text: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --success: #10b981;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+
+  /* Legacy aliases — remove after migration complete */
+  --panel: var(--surface);
+  --panel-muted: var(--surface-muted);
+  --panel-strong: var(--surface-strong);
+  --text-soft: var(--text-secondary);
+  --text-faint: var(--text-muted);
+  --accent-strong: var(--accent-hover);
+
+  /* Typography */
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.07), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+
+  /* Status colors */
+  --status-active: #3b82f6;
+  --status-active-bg: rgba(59, 130, 246, 0.1);
+  --status-active-border: rgba(59, 130, 246, 0.2);
+  --status-complete: #10b981;
+  --status-complete-bg: rgba(16, 185, 129, 0.08);
+  --status-complete-border: rgba(16, 185, 129, 0.2);
+  --status-stopped: #ef4444;
+  --status-stopped-bg: rgba(239, 68, 68, 0.08);
+  --status-stopped-border: rgba(239, 68, 68, 0.2);
+  --status-planned: #f59e0b;
+  --status-planned-bg: rgba(245, 158, 11, 0.08);
+  --status-planned-border: rgba(245, 158, 11, 0.2);
+  --status-muted: #6b7280;
+  --status-muted-bg: rgba(107, 114, 128, 0.08);
+  --status-muted-border: rgba(107, 114, 128, 0.2);
+
+  /* Phase colors */
+  --phase-thinking: #8b5cf6;
+  --phase-preview: #3b82f6;
+  --phase-complete: #10b981;
+  --phase-error: #ef4444;
+  --phase-default: #6b7280;
+}

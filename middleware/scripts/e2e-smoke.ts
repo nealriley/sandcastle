@@ -4,9 +4,7 @@ import { createOwnedSandboxTask } from "../lib/create-owned-sandbox.ts";
 import { getOrCreatePairingCode } from "../lib/pairing.ts";
 import {
   getCreatableSandcastleTemplate,
-  resolveTemplateEnvironment,
 } from "../lib/templates.ts";
-import { buildTemplateValidationUrl } from "../lib/url.ts";
 import type {
   SandboxListResponse,
   TaskResponse,
@@ -168,10 +166,12 @@ async function main() {
     )
   );
   requireEnv("ANTHROPIC_API_KEY", process.env.ANTHROPIC_API_KEY ?? "");
-
   console.log("=== Sandcastle E2E Smoke Test ===\n");
   console.log(`Base URL: ${BASE_URL}`);
   console.log(`Keep sandboxes: ${KEEP_SANDBOXES ? "yes" : "no"}\n`);
+  const includeCodex =
+    (process.env.OPENAI_API_KEY ?? "").trim().length > 0 &&
+    process.env.SANDCASTLE_SMOKE_SKIP_CODEX !== "1";
 
   const suffix = randomUUID().slice(0, 8);
   const user = {
@@ -179,6 +179,7 @@ async function main() {
     login: `sandcastle-smoke-${suffix}`,
   };
   const managed: ManagedSandbox[] = [];
+  let codexStart: TaskResponse | null = null;
 
   try {
     console.log("1. Minting connector code and listing owned sandboxes...");
@@ -192,70 +193,102 @@ async function main() {
     console.log("   PASS: Fresh paired user has no owned sandboxes.");
 
     console.log(
-      "\n2. Starting a standard sandbox through the Pack-compatible control-plane route..."
+      "\n2. Starting a Claude Code sandbox through the Pack-compatible control-plane route..."
     );
-    const standardStart = await postJson<TaskResponse>("/api/sessions", {
+    const claudeStart = await postJson<TaskResponse>("/api/sessions", {
       headers: { "X-Agent-Key": AGENT_API_KEY },
       body: {
         prompt:
           "Create a file named smoke-http.txt containing the exact text 'sandcastle smoke test', then read it back and report the contents.",
         authCode: firstCode,
-        templateSlug: "standard",
+        templateSlug: "claude-code",
       },
       expectedStatuses: [202],
     });
     managed.push({
-      label: "standard sandbox",
-      sandboxId: standardStart.sandboxId,
-      sessionId: standardStart.sessionId,
+      label: "claude sandbox",
+      sandboxId: claudeStart.sandboxId,
+      sessionId: claudeStart.sessionId,
     });
-    const standardDone = await pollTask("standard sandbox", standardStart.taskId);
-    assert.equal(standardDone.status, "complete");
-    assert.match(standardDone.result ?? "", /sandcastle smoke test/i);
-    managed[managed.length - 1].sessionId = standardDone.sessionId;
-    console.log("   PASS: Standard sandbox completed the initial task.");
+    const claudeDone = await pollTask("claude sandbox", claudeStart.taskId);
+    assert.equal(claudeDone.status, "complete");
+    assert.match(claudeDone.result ?? "", /sandcastle smoke test/i);
+    managed[managed.length - 1].sessionId = claudeDone.sessionId;
+    console.log("   PASS: Claude Code sandbox completed the initial task.");
 
-    console.log("\n3. Starting a template-backed sandbox with env injection through the shared creation path...");
-    const template = getCreatableSandcastleTemplate("shell-scripts-validation");
-    assert.ok(template, "Expected shell-scripts-validation template to exist");
-    const baseRequest = new Request(`${BASE_URL}/smoke/e2e`);
-    const validationEnvironment = resolveTemplateEnvironment(
-      template,
-      {
-        SMOKE_TOKEN: "sandcastle-smoke-token",
-        VALIDATION_API_KEY: "sandcastle-smoke-api-key",
-      },
-      {
-        templateValidationUrl: buildTemplateValidationUrl(baseRequest),
-      }
+    if (includeCodex) {
+      console.log(
+        "\n3. Starting a Codex sandbox through the Pack-compatible control-plane route..."
+      );
+      codexStart = await postJson<TaskResponse>("/api/sessions", {
+        headers: { "X-Agent-Key": AGENT_API_KEY },
+        body: {
+          prompt:
+            "Create a file named smoke-codex.txt containing the exact text 'codex smoke test', then read it back and report the contents.",
+          authCode: firstCode,
+          templateSlug: "codex",
+        },
+        expectedStatuses: [202],
+      });
+      managed.push({
+        label: "codex sandbox",
+        sandboxId: codexStart.sandboxId,
+        sessionId: codexStart.sessionId,
+      });
+      const codexDone = await pollTask("codex sandbox", codexStart.taskId);
+      assert.equal(codexDone.status, "complete");
+      assert.match(codexDone.result ?? "", /codex smoke test/i);
+      managed[managed.length - 1].sessionId = codexDone.sessionId;
+      console.log("   PASS: Codex sandbox completed the initial task.");
+    } else {
+      console.log(
+        "\n3. Skipping Codex smoke because OPENAI_API_KEY is not configured locally or SANDCASTLE_SMOKE_SKIP_CODEX=1."
+      );
+    }
+
+    console.log(
+      "\n4. Starting a wordcount shell-command sandbox through the shared creation path..."
     );
-    const validationStart = await createOwnedSandboxTask(baseRequest as never, {
-      prompt:
-        "Read the SMOKE_TOKEN environment variable and tell me its exact value. Then run ./sandcastle-template/verify-request.sh and confirm the validation endpoint passed.",
+    const template = getCreatableSandcastleTemplate("wordcount");
+    assert.ok(template, "Expected wordcount template to exist");
+    const baseRequest = new Request(`${BASE_URL}/smoke/e2e`);
+    const wordcountStart = await createOwnedSandboxTask(baseRequest as never, {
+      prompt: "/vercel/sandbox/wordcount.txt",
       runtime: "node24",
       template,
-      environment: validationEnvironment,
-      envKeys: Object.keys(validationEnvironment).sort(),
+      environment: {
+        WORDCOUNT_METHOD: "awk-fields",
+      },
+      envKeys: ["WORDCOUNT_METHOD"],
       ownerUserId: user.id,
       ownerLogin: user.login,
     });
     managed.push({
-      label: "validation sandbox",
-      sandboxId: validationStart.sandboxId,
-      sessionId: validationStart.sessionId,
+      label: "wordcount sandbox",
+      sandboxId: wordcountStart.sandboxId,
+      sessionId: wordcountStart.sessionId,
     });
-    const validationDone = await pollTask(
-      "validation sandbox",
-      validationStart.taskId
+    const wordcountDone = await pollTask(
+      "wordcount sandbox",
+      wordcountStart.taskId
     );
-    assert.equal(validationDone.status, "complete");
-    assert.match(validationDone.result ?? "", /sandcastle-smoke-token/i);
-    managed[managed.length - 1].sessionId = validationDone.sessionId;
-    console.log("   PASS: Template-backed sandbox inherited and used launch env.");
+    assert.equal(wordcountDone.status, "complete");
+    assert.match(wordcountDone.result ?? "", /Method:\s*awk-fields/i);
+    assert.match(
+      wordcountDone.result ?? "",
+      /File:\s*\/vercel\/sandbox\/wordcount\.txt/i
+    );
+    assert.match(wordcountDone.result ?? "", /Word count:\s*4/i);
+    managed[managed.length - 1].sessionId = wordcountDone.sessionId;
+    console.log(
+      "   PASS: Wordcount shell-command sandbox completed successfully."
+    );
 
-    console.log("\n4. Continuing the standard sandbox with the token-scoped follow-up route...");
-    const standardFollowUp = await postJson<TaskResponse>(
-      `/api/sessions/${encodeURIComponent(standardDone.sessionId)}/prompt`,
+    console.log(
+      "\n5. Continuing the Claude Code sandbox with the token-scoped follow-up route..."
+    );
+    const claudeFollowUp = await postJson<TaskResponse>(
+      `/api/sessions/${encodeURIComponent(claudeDone.sessionId)}/prompt`,
       {
         body: {
           prompt:
@@ -264,52 +297,57 @@ async function main() {
         expectedStatuses: [202],
       }
     );
-    const standardFollowUpDone = await pollTask(
-      "standard follow-up",
-      standardFollowUp.taskId
+    const claudeFollowUpDone = await pollTask(
+      "claude follow-up",
+      claudeFollowUp.taskId
     );
-    assert.equal(standardFollowUpDone.status, "complete");
-    assert.match(standardFollowUpDone.result ?? "", /sandcastle smoke test/i);
-    managed[0].sessionId = standardFollowUpDone.sessionId;
+    assert.equal(claudeFollowUpDone.status, "complete");
+    assert.match(claudeFollowUpDone.result ?? "", /sandcastle smoke test/i);
+    managed[0].sessionId = claudeFollowUpDone.sessionId;
     console.log("   PASS: Token-scoped follow-up succeeded.");
 
-    console.log("\n5. Listing owned sandboxes again and checking template metadata...");
+    console.log("\n6. Listing owned sandboxes again and checking template metadata...");
     const secondCode = (await getOrCreatePairingCode(user)).code;
     const listed = await postJson<SandboxListResponse>("/api/sandboxes", {
       body: { authCode: secondCode, includeStopped: true },
       expectedStatuses: [200],
     });
     assert.ok(
-      listed.sandboxes.some((sandbox) => sandbox.sandboxId === standardStart.sandboxId)
+      listed.sandboxes.some((sandbox) => sandbox.sandboxId === claudeStart.sandboxId)
     );
+    if (codexStart) {
+      assert.ok(
+        listed.sandboxes.some(
+          (sandbox) =>
+            sandbox.sandboxId === codexStart!.sandboxId &&
+            sandbox.templateSlug === "codex"
+        )
+      );
+    }
     assert.ok(
       listed.sandboxes.some(
         (sandbox) =>
-          sandbox.sandboxId === validationStart.sandboxId &&
-          sandbox.templateSlug === "shell-scripts-validation"
+          sandbox.sandboxId === wordcountStart.sandboxId &&
+          sandbox.templateSlug === "wordcount"
       )
     );
-    console.log("   PASS: Owned sandbox discovery returned both sandboxes.");
+    console.log("   PASS: Owned sandbox discovery returned all smoke sandboxes.");
 
-    console.log("\n6. Resuming the validation sandbox through the auth-paired resume route...");
-    const resumed = await postJson<TaskResponse>("/api/sandboxes/resume", {
+    console.log("\n7. Verifying shell-command sandboxes reject follow-up prompts...");
+    const resumed = await postJson<{ error?: string }>("/api/sandboxes/resume", {
       body: {
         authCode: secondCode,
-        sandboxId: validationStart.sandboxId,
-        prompt:
-          "Echo the SMOKE_TOKEN environment variable again and confirm it still matches the original launch value.",
+        sandboxId: wordcountStart.sandboxId,
+        prompt: "Run another command.",
       },
-      expectedStatuses: [202],
+      expectedStatuses: [400],
     });
-    const resumedDone = await pollTask("validation resume", resumed.taskId);
-    assert.equal(resumedDone.status, "complete");
-    assert.match(resumedDone.result ?? "", /sandcastle-smoke-token/i);
-    managed[1].sessionId = resumedDone.sessionId;
-    console.log("   PASS: Resume flow preserved sandbox ownership and env state.");
+    assert.match(resumed.error ?? "", /does not accept follow-up prompts/i);
+    console.log("   PASS: Shell-command follow-up rejection is enforced.");
 
     console.log("\n=== Sandcastle E2E smoke test passed ===");
   } finally {
-    console.log("\n7. Cleaning up smoke sandboxes...");
+    console.log("\n8. Cleaning up smoke sandboxes...");
     await stopManagedSandboxes(managed);
   }
 }

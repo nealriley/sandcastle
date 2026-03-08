@@ -1,37 +1,9 @@
 import type { Sandbox } from "@vercel/sandbox";
-
-const ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+import {
+  validateEnvironmentEntry,
+} from "./environment-rules";
 const MAX_ENVIRONMENT_VARIABLES = 16;
-const MAX_ENV_VALUE_LENGTH = 4_000;
 export const SANDBOX_ENV_PATH = "/vercel/sandbox/.sandcastle-env.json";
-
-const BLOCKED_ENV_KEYS = new Set([
-  "AGENT_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_BASE_URL",
-  "AUTH_SECRET",
-  "CONTROL_TOKEN_SECRET",
-  "HOME",
-  "NODE_OPTIONS",
-  "PATH",
-  "PWD",
-  "SHELL",
-  "USER",
-]);
-
-const BLOCKED_ENV_PREFIXES = [
-  "ANTHROPIC_",
-  "AUTH_",
-  "CODA_",
-  "CONTROL_",
-  "KV_",
-  "NEXTAUTH_",
-  "NEXT_PUBLIC_",
-  "REDIS_",
-  "UPSTASH_",
-  "VERCEL_",
-];
 
 export interface SandboxEnvironmentEntryInput {
   key?: string;
@@ -45,14 +17,6 @@ export interface NormalizedSandboxEnvironment {
 
 function normalizeKey(input: string): string {
   return input.trim().toUpperCase();
-}
-
-function isBlockedKey(key: string): boolean {
-  if (BLOCKED_ENV_KEYS.has(key)) {
-    return true;
-  }
-
-  return BLOCKED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
 export function normalizeSandboxEnvironment(
@@ -77,33 +41,18 @@ export function normalizeSandboxEnvironment(
       continue;
     }
 
-    if (!key) {
-      throw new Error("Environment variable keys cannot be blank.");
-    }
+    const validated = validateEnvironmentEntry({
+      key: rawKey,
+      value: rawValue,
+    });
 
-    if (!ENV_KEY_PATTERN.test(key)) {
+    if (env.has(validated.key)) {
       throw new Error(
-        `Environment variable '${key}' must start with a letter and contain only A-Z, 0-9, and underscores.`
+        `Environment variable '${validated.key}' is defined more than once.`
       );
     }
 
-    if (isBlockedKey(key)) {
-      throw new Error(
-        `Environment variable '${key}' is reserved by Sandcastle and cannot be set on a sandbox.`
-      );
-    }
-
-    if (rawValue.length > MAX_ENV_VALUE_LENGTH) {
-      throw new Error(
-        `Environment variable '${key}' exceeds the maximum value length of ${MAX_ENV_VALUE_LENGTH} characters.`
-      );
-    }
-
-    if (env.has(key)) {
-      throw new Error(`Environment variable '${key}' is defined more than once.`);
-    }
-
-    env.set(key, rawValue);
+    env.set(validated.key, validated.value);
   }
 
   if (env.size > MAX_ENVIRONMENT_VARIABLES) {

@@ -5,6 +5,7 @@ import {
   createUserTemplateVersionInRedis,
   listSystemTemplateCatalogEntries,
   listTemplateCatalogInRedis,
+  normalizeDeclarativeTemplateSpec,
   publishUserTemplateVersionInRedis,
   resolveLaunchableTemplateBySlugInRedis,
   resolveTemplateBySlugInRedis,
@@ -25,13 +26,131 @@ test.afterEach(() => {
 test("system template catalog exposes the current built-ins through the service layer", () => {
   const entries = listSystemTemplateCatalogEntries();
 
-  assert.ok(entries.some((entry) => entry.slug === "standard"));
   assert.ok(entries.some((entry) => entry.slug === "claude-code"));
   assert.ok(entries.some((entry) => entry.slug === "codex"));
-  assert.ok(entries.some((entry) => entry.slug === "shell-scripts-validation"));
-  assert.ok(entries.some((entry) => entry.slug === "webpage-inspector"));
+  assert.ok(entries.some((entry) => entry.slug === "website-deep-dive"));
+  assert.ok(entries.some((entry) => entry.slug === "wordcount"));
   assert.ok(entries.every((entry) => entry.ownerType === "system"));
   assert.ok(entries.every((entry) => entry.latestVersionState === "published"));
+  assert.equal(
+    entries.find((entry) => entry.slug === "claude-code")?.executionStrategyKind,
+    "claude-agent"
+  );
+  assert.equal(
+    entries.find((entry) => entry.slug === "codex")?.executionStrategyKind,
+    "codex-agent"
+  );
+  assert.equal(
+    entries.find((entry) => entry.slug === "wordcount")?.executionStrategyKind,
+    "shell-command"
+  );
+  assert.equal(
+    entries.find((entry) => entry.slug === "wordcount")?.acceptsPrompts,
+    true
+  );
+  assert.equal(
+    entries.find((entry) => entry.slug === "codex")?.environmentSchema[0]?.inputType,
+    "select"
+  );
+  assert.equal(
+    entries.find((entry) => entry.slug === "website-deep-dive")?.environmentSchema[0]
+      ?.inputType,
+    "select"
+  );
+  assert.equal(
+    entries.find((entry) => entry.slug === "wordcount")?.environmentSchema[0]?.key,
+    "WORDCOUNT_METHOD"
+  );
+  assert.equal(
+    entries.find((entry) => entry.slug === "wordcount")?.environmentSchema[0]
+      ?.inputType,
+    "select"
+  );
+});
+
+test("normalizeDeclarativeTemplateSpec defaults executionStrategy to claude-agent", () => {
+  const spec = normalizeDeclarativeTemplateSpec({});
+
+  assert.deepEqual(spec.executionStrategy, { kind: "claude-agent" });
+});
+
+test("normalizeDeclarativeTemplateSpec validates shell-command execution strategies", () => {
+  const spec = normalizeDeclarativeTemplateSpec({
+    executionStrategy: {
+      kind: "shell-command",
+      cmd: "bash",
+      args: ["-lc", "echo hello"],
+      cwd: "/vercel/sandbox",
+    },
+  });
+
+  assert.deepEqual(spec.executionStrategy, {
+    kind: "shell-command",
+    cmd: "bash",
+    args: ["-lc", "echo hello"],
+    cwd: "/vercel/sandbox",
+    promptMode: "none",
+    promptEnvKey: null,
+  });
+
+  assert.throws(
+    () =>
+      normalizeDeclarativeTemplateSpec({
+        executionStrategy: {
+          kind: "shell-command",
+          cmd: "bash",
+          args: ["-lc", 42],
+        },
+      }),
+    (error: unknown) =>
+      error instanceof TemplateServiceError &&
+      error.message.includes("executionStrategy.args[1]")
+  );
+});
+
+test("normalizeDeclarativeTemplateSpec validates select-based environment fields", () => {
+  const spec = normalizeDeclarativeTemplateSpec({
+    environmentSchema: [
+      {
+        key: "OPENAI_MODEL",
+        label: "OpenAI model",
+        description: "Pick the model.",
+        inputType: "select",
+        defaultValue: "gpt-5.2-codex",
+        options: [
+          {
+            value: "gpt-5.2-codex",
+            label: "GPT-5.2 Codex",
+          },
+          {
+            value: "gpt-5-codex",
+            label: "GPT-5 Codex",
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(spec.environmentSchema[0]?.inputType, "select");
+  assert.equal(spec.environmentSchema[0]?.options[0]?.value, "gpt-5.2-codex");
+
+  assert.throws(
+    () =>
+      normalizeDeclarativeTemplateSpec({
+        environmentSchema: [
+          {
+            key: "OPENAI_MODEL",
+            label: "OpenAI model",
+            description: "Pick the model.",
+            inputType: "select",
+            options: [],
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof TemplateServiceError &&
+      error.message.includes("options must contain at least one option")
+  );
 });
 
 test("user templates can be created, updated, versioned, published, and resolved from Redis storage", async () => {
@@ -49,6 +168,9 @@ test("user templates can be created, updated, versioned, published, and resolved
   assert.equal(created.template.slug, "custom-audit");
   assert.equal(created.versions.length, 1);
   assert.equal(created.versions[0]?.state, "draft");
+  assert.deepEqual(created.versions[0]?.spec.executionStrategy, {
+    kind: "claude-agent",
+  });
 
   const updated = await updateUserTemplateInRedis(
     fakeRedis,
@@ -87,6 +209,8 @@ test("user templates can be created, updated, versioned, published, and resolved
             description: "Used by the template.",
             required: false,
             secret: true,
+            inputType: "text",
+            options: [],
           },
         ],
         promptConfig: {
@@ -123,6 +247,9 @@ test("user templates can be created, updated, versioned, published, and resolved
   );
   assert.equal(draftVersion?.state, "draft");
   assert.equal(draftVersion?.spec.kind, "declarative");
+  assert.deepEqual(draftVersion?.spec.executionStrategy, {
+    kind: "claude-agent",
+  });
 
   const published = await publishUserTemplateVersionInRedis(
     fakeRedis,
@@ -149,6 +276,11 @@ test("user templates can be created, updated, versioned, published, and resolved
 
   const catalog = await listTemplateCatalogInRedis(fakeRedis, "user_123");
   assert.ok(catalog.templates.some((entry) => entry.slug === "custom-audit"));
+  assert.equal(
+    catalog.templates.find((entry) => entry.slug === "custom-audit")
+      ?.executionStrategyKind,
+    "claude-agent"
+  );
 
   const resolved = await resolveTemplateBySlugInRedis(
     fakeRedis,
@@ -166,7 +298,7 @@ test("user template slugs may not collide with system templates", async () => {
     () =>
       createUserTemplateInRedis(fakeRedis, {
         ownerUserId: "user_123",
-        slug: "standard",
+        slug: "claude-code",
         name: "Bad collision",
         summary: "Should fail",
         purpose: "Should fail",
@@ -179,11 +311,11 @@ test("user template slugs may not collide with system templates", async () => {
 test("launchable template resolution preserves built-ins and published user templates", async () => {
   const systemTemplate = await resolveLaunchableTemplateBySlugInRedis(
     fakeRedis,
-    "standard",
+    "claude-code",
     null
   );
   assert.ok(systemTemplate);
-  assert.equal(systemTemplate?.slug, "standard");
+  assert.equal(systemTemplate?.slug, "claude-code");
 
   const created = await createUserTemplateInRedis(fakeRedis, {
     ownerUserId: "user_123",
@@ -200,6 +332,14 @@ test("launchable template resolution preserves built-ins and published user temp
         defaultRuntime: "node24",
         supportedRuntimes: ["node24", "node22"],
       },
+      executionStrategy: {
+        kind: "shell-command",
+        cmd: "bash",
+        args: ["-lc", "echo bootstrap ready"],
+        cwd: "/vercel/sandbox",
+        promptMode: "none",
+        promptEnvKey: null,
+      },
       launchConfig: {
         ports: [3000, 4173],
         timeoutMs: 180000,
@@ -212,6 +352,8 @@ test("launchable template resolution preserves built-ins and published user temp
           description: "API endpoint for the template.",
           required: true,
           secret: false,
+          inputType: "text",
+          options: [],
         },
       ],
       promptConfig: {
@@ -244,6 +386,14 @@ test("launchable template resolution preserves built-ins and published user temp
   assert.ok(launchable);
   assert.equal(launchable?.slug, "custom-launch");
   assert.deepEqual(launchable?.supportedRuntimes, ["node24", "node22"]);
+  assert.deepEqual(launchable?.executionStrategy, {
+    kind: "shell-command",
+    cmd: "bash",
+    args: ["-lc", "echo bootstrap ready"],
+    cwd: "/vercel/sandbox",
+    promptMode: "none",
+    promptEnvKey: null,
+  });
   assert.equal(launchable?.ports[1], 4173);
   assert.equal(launchable?.envHints[0]?.key, "CUSTOM_ENDPOINT");
   assert.match(

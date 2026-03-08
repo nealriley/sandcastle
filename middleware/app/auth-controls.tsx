@@ -42,7 +42,7 @@ export default function AuthControls({
         </button>
       ) : (
         <GitHubSignInButton
-          callbackUrl="/sandboxes"
+          callbackUrl="/dashboard"
           className="button button--primary button--small"
         >
           Sign in with GitHub

@@ -21,9 +21,11 @@ export default function SiteNav(props: {
 }) {
   const pathname = usePathname();
   const signedInLinks = [
-    { href: "/sandboxes", label: "Sandboxes" },
-    { href: "/templates", label: "Templates" },
-    { href: "/connector", label: "Connect" },
+    { href: "/dashboard", label: "Dashboard" },
+    { href: "/marketplace", label: "Marketplace" },
+    { href: "/environment", label: "Environment" },
+    { href: "/connect", label: "Connect" },
+    { href: "/profile", label: "Profile" },
   ];
 
   if (!props.isSignedIn) {
@@ -50,7 +52,7 @@ export default function SiteNav(props: {
     <aside className="sidebar">
       <div className="sidebar__section">
         <div className="sidebar__brand">
-          <BrandLogo href="/sandboxes" />
+          <BrandLogo href="/dashboard" />
         </div>
 
         <nav className="sidebar__nav" aria-label="Primary">

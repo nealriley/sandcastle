@@ -10,13 +10,16 @@ import {
 import { getOwnedSession, touchOwnedSession } from "./session-ownership";
 import { decodeSessionToken, encodeTaskToken } from "./tokens";
 import { startAgentTask } from "./agent-runner";
+import { executionStrategyRequiresAnthropicProxy } from "./execution-strategy";
 import { buildAnthropicProxyBaseUrl, buildSandboxUrl } from "./url";
+import type { ExecutionStrategy } from "./template-service-types";
 import type { SessionToken, TaskResponse } from "./types.js";
 
 export async function startSandboxFollowUpTask(
   req: NextRequest,
   session: SessionToken,
-  prompt: string
+  prompt: string,
+  executionStrategy: ExecutionStrategy = { kind: "claude-agent" }
 ): Promise<TaskResponse> {
   const sandbox = await Sandbox.get({ sandboxId: session.sandboxId });
   const state = await reconcileSessionState(sandbox, session);
@@ -30,14 +33,19 @@ export async function startSandboxFollowUpTask(
   }
 
   const taskFileId = randomUUID();
-  const anthropicBaseUrl = buildAnthropicProxyBaseUrl(req);
+  const anthropicBaseUrl = executionStrategyRequiresAnthropicProxy(
+    executionStrategy
+  )
+    ? buildAnthropicProxyBaseUrl(req)
+    : null;
 
   const cmdId = await startAgentTask(
     sandbox,
     prompt,
     taskFileId,
     state.agentSessionId,
-    anthropicBaseUrl
+    anthropicBaseUrl,
+    executionStrategy
   );
 
   const taskId = encodeTaskToken({

@@ -8,13 +8,11 @@ product surface is Sandcastle.
 
 - `pack.ts`
   The Coda Pack / SHGO integration layer.
-- `helpers.ts`
-  Shared Pack URL helpers.
 - `schemas.ts`, `types.ts`
   Pack-side response contracts.
 - `middleware/`
   The Sandcastle website, API routes, auth layer, sandbox orchestration, and
-  test scripts.
+  verification scripts.
 
 ## Current Product Model
 
@@ -22,35 +20,41 @@ Sandcastle has two user-facing entry points:
 
 1. The website
    - sign in with GitHub
-   - create sandboxes from templates
-   - view owned sandboxes
-   - inspect console output and previews
-   - prompt or stop active sandboxes
-   - mint three-word connector codes
+   - launch sandboxes from the marketplace
+   - inspect owned sandboxes on the dashboard
+   - watch console output, preview URLs, and task history
+   - send follow-up prompts or stop active sandboxes
+   - store reusable launch-time environment variables
+   - mint three-word connector codes for SHGO
 
-2. SHGO
+2. SHGO / Coda Pack
    - create a sandbox from chat
-   - list owned sandboxes
+   - list templates and owned sandboxes
    - resume a sandbox by id
-   - continue work in the currently selected sandbox
-   - read files / previews / status
+   - continue work in the selected sandbox
+   - read files, previews, logs, and status
 
-The system is intentionally async. Chat requests return fast with a sandbox URL,
-while the long-running task continues inside a Vercel Sandbox.
+The system is intentionally async. Creation and follow-up requests return fast
+with task/session metadata while the long-running work continues inside a Vercel
+Sandbox.
 
-## Built-In Templates
+## Current Built-In Templates
 
-- `standard`
 - `claude-code`
 - `codex`
-- `shell-scripts-validation`
-- `webpage-inspector`
+- `website-deep-dive`
+- `wordcount`
 
-Template internals are documented in
-[`docs/templates.md`](docs/templates.md).
+Current execution strategies:
 
-Architecture and release-plan docs live alongside the repo:
+- `claude-agent`
+- `codex-agent`
+- `shell-command`
 
+## Current Documentation
+
+- [`docs/current-state-audit.md`](docs/current-state-audit.md)
+- [`docs/templates.md`](docs/templates.md)
 - [`docs/architecture.md`](docs/architecture.md)
 - [`TASKS.md`](TASKS.md)
 
@@ -69,15 +73,16 @@ Middleware:
 
 ```bash
 cd projects/ai-coding-agent/middleware
-pnpm test
 pnpm typecheck
+pnpm test
 pnpm build
 pnpm smoke:e2e
 ```
 
 ## Local Setup
 
-- Copy [`middleware/.env.example`](middleware/.env.example) to `middleware/.env.local`.
+- Copy [`middleware/.env.example`](middleware/.env.example) to
+  `middleware/.env.local`.
 - Fill in the required secrets locally.
 - Keep `.coda.json` local-only; it is ignored and should not be committed.
 
@@ -91,26 +96,21 @@ Middleware side:
 
 - `AGENT_API_KEY`
 - `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
 - `CONTROL_TOKEN_SECRET`
 - `AUTH_SECRET`
 - `AUTH_GITHUB_ID`
 - `AUTH_GITHUB_SECRET`
+- `TEMPLATE_SERVICE_INTERNAL_KEY`
 - `UPSTASH_REDIS_REST_URL` or `KV_URL`
 - `UPSTASH_REDIS_REST_TOKEN` or `KV_REST_API_TOKEN`
 - `PUBLIC_APP_URL`
 
 ## Deployment Notes
 
-- The Pack uses the canonical middleware base URL from `helpers.ts`.
-- The middleware health route (`/api/health`) now validates auth, Redis, token
-  signing, Anthropic upstream config, and template registry integrity.
-- Browser sandbox actions are owner-authenticated server routes. The website no
-  longer receives mutable sandbox bearer tokens.
-
-## Release Candidate Notes
-
-Current intentional deferrals:
-
-- more built-in templates beyond the five live ones
-- the GitHub auth callback `url.parse()` deprecation warning, which currently
-  appears to be upstream behavior in the Next/Auth stack
+- The middleware deploys to Vercel from `middleware/`.
+- The Pack release is separate from the middleware deploy.
+- `/api/health` validates auth, Redis, token signing, Anthropic/OpenAI upstream
+  config, template registry integrity, and template-service auth.
+- Browser sandbox actions are owner-authenticated server routes. The website
+  never receives mutable sandbox bearer tokens.

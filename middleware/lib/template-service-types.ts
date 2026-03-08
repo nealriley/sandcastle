@@ -5,6 +5,19 @@ export type TemplateVisibility = "system" | "private";
 export type TemplateRecordStatus = "active" | "archived";
 export type TemplateVersionState = "draft" | "published" | "deprecated";
 export type TemplateSpecKind = "legacy_builtin" | "declarative";
+export type ShellCommandPromptMode = "none" | "env";
+
+export type ExecutionStrategy =
+  | { kind: "claude-agent" }
+  | { kind: "codex-agent" }
+  | {
+      kind: "shell-command";
+      cmd: string;
+      args: string[];
+      cwd: string | null;
+      promptMode: ShellCommandPromptMode;
+      promptEnvKey: string | null;
+    };
 
 export interface TemplateSourceRuntime {
   kind: "runtime";
@@ -31,6 +44,14 @@ export interface TemplateLaunchConfig {
   vcpus: number;
 }
 
+export type TemplateEnvironmentFieldInputType = "text" | "select";
+
+export interface TemplateEnvironmentFieldOption {
+  value: string;
+  label: string;
+  description: string | null;
+}
+
 export interface TemplateEnvironmentField {
   key: string;
   label: string;
@@ -38,6 +59,8 @@ export interface TemplateEnvironmentField {
   required: boolean;
   secret: boolean;
   defaultValue: string | null;
+  inputType: TemplateEnvironmentFieldInputType;
+  options: TemplateEnvironmentFieldOption[];
 }
 
 export interface TemplatePromptConfig {
@@ -79,6 +102,7 @@ interface BaseTemplateSpec {
   launchConfig: TemplateLaunchConfig;
   environmentSchema: TemplateEnvironmentField[];
   promptConfig: TemplatePromptConfig;
+  executionStrategy: ExecutionStrategy;
 }
 
 export interface LegacyBuiltinTemplateSpec extends BaseTemplateSpec {
@@ -139,6 +163,8 @@ export interface TemplateCatalogEntry {
   sourceKind: TemplateSourceKind;
   defaultRuntime: RuntimeName;
   supportedRuntimes: RuntimeName[];
+  executionStrategyKind: ExecutionStrategy["kind"];
+  acceptsPrompts: boolean;
   promptPlaceholder: string;
   defaultPrompt: string | null;
   environmentSchema: TemplateEnvironmentField[];

@@ -4,7 +4,9 @@ import {
   findCurrentTask,
   reconcileSessionState,
 } from "@/lib/session-state";
+import { executionStrategyAllowsFollowUps } from "@/lib/execution-strategy";
 import { startSandboxFollowUpTask } from "@/lib/sandbox-follow-up";
+import type { ExecutionStrategy } from "@/lib/template-service-types";
 import { requireWebsiteOwnedSandbox } from "@/lib/website-owned-sandbox";
 
 const MAX_PROMPT_LENGTH = 100_000;
@@ -45,6 +47,19 @@ export async function POST(
   }
 
   const { record, session } = owned.context;
+  const followUpStrategy: ExecutionStrategy = {
+    kind:
+      record.executionStrategyKind === "codex-agent"
+        ? "codex-agent"
+        : "claude-agent",
+  };
+  if (!executionStrategyAllowsFollowUps(record.executionStrategyKind ?? null)) {
+    return Response.json(
+      { error: "This template does not accept follow-up prompts." },
+      { status: 400 }
+    );
+  }
+
   if (!session || record.status === "stopped") {
     return Response.json(
       { error: "Sandbox is no longer available." },
@@ -74,7 +89,12 @@ export async function POST(
       );
     }
 
-    const task = await startSandboxFollowUpTask(req, session, prompt);
+    const task = await startSandboxFollowUpTask(
+      req,
+      session,
+      prompt,
+      followUpStrategy
+    );
     return Response.json(
       {
         taskId: task.taskId,

@@ -4,9 +4,24 @@ import { getWebsiteUser } from "@/auth";
 import { buildSessionView, readSessionState } from "@/lib/session-state";
 import { getOwnedSession } from "@/lib/session-ownership";
 import { evaluateSessionViewAccess } from "@/lib/session-view-access";
+import {
+  logSessionDiagnostic,
+  summarizeOwnedSessionRecordForDiagnostics,
+  summarizeSessionStateForDiagnostics,
+  summarizeSessionViewForDiagnostics,
+} from "@/lib/session-diagnostics";
+import type { ExecutionStrategy } from "@/lib/template-service-types";
 import { decodeViewToken } from "@/lib/tokens";
 import type { SessionToken, SessionViewResponse } from "@/lib/types";
 import { buildSandboxUrl } from "@/lib/url";
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === "string");
+}
 
 function stoppedView(
   req: NextRequest,
@@ -16,6 +31,7 @@ function stoppedView(
     sessionKey?: string;
     templateSlug?: string | null;
     templateName?: string | null;
+    executionStrategyKind?: ExecutionStrategy["kind"] | null;
     envKeys?: string[];
   }
 ): SessionViewResponse {
@@ -25,7 +41,8 @@ function stoppedView(
     sandboxUrl: buildSandboxUrl(req, viewToken),
     templateSlug: metadata?.templateSlug ?? null,
     templateName: metadata?.templateName ?? null,
-    envKeys: metadata?.envKeys ?? [],
+    executionStrategyKind: metadata?.executionStrategyKind ?? null,
+    envKeys: normalizeStringArray(metadata?.envKeys),
     status: "stopped",
     phase: "stopped",
     phaseDetail: "Sandbox is no longer available.",
@@ -59,6 +76,14 @@ export async function GET(
   let sessionKeyForFallback = "";
 
   if (!user) {
+    logSessionDiagnostic({
+      event: "view_route_unauthenticated",
+      level: "warn",
+      data: {
+        httpStatus: 401,
+        viewTokenTail: viewToken.slice(-8),
+      },
+    });
     return Response.json(
       { error: "Sign in is required to view this sandbox." },
       { status: 401 }
@@ -77,6 +102,17 @@ export async function GET(
     });
 
     if (access.kind === "unauthenticated") {
+      logSessionDiagnostic({
+        event: "view_route_unauthenticated",
+        level: "warn",
+        data: {
+          httpStatus: 401,
+          sandboxId: viewData.sandboxId,
+          sessionKey: viewData.sessionKey,
+          viewerUserId: user.id,
+          record: summarizeOwnedSessionRecordForDiagnostics(record),
+        },
+      });
       return Response.json(
         { error: "Sign in is required to view this sandbox." },
         { status: 401 }
@@ -84,6 +120,18 @@ export async function GET(
     }
 
     if (access.kind === "forbidden") {
+      logSessionDiagnostic({
+        event: "view_route_forbidden",
+        level: "warn",
+        data: {
+          httpStatus: 403,
+          sandboxId: viewData.sandboxId,
+          sessionKey: viewData.sessionKey,
+          viewerUserId: user.id,
+          ownerUserId: access.ownerUserId,
+          record: summarizeOwnedSessionRecordForDiagnostics(record),
+        },
+      });
       return Response.json(
         { error: "This sandbox belongs to a different signed-in user." },
         { status: 403 }
@@ -93,11 +141,23 @@ export async function GET(
     const sandbox = await Sandbox.get({ sandboxId: viewData.sandboxId });
     const state = await readSessionState(sandbox);
     if (!state) {
+      logSessionDiagnostic({
+        event: "view_route_state_missing",
+        level: "warn",
+        data: {
+          httpStatus: 200,
+          sandboxId: viewData.sandboxId,
+          sessionKey: viewData.sessionKey,
+          viewerUserId: user.id,
+          record: summarizeOwnedSessionRecordForDiagnostics(record),
+        },
+      });
       return Response.json(
         stoppedView(req, viewToken, viewData.sandboxId, {
           sessionKey: viewData.sessionKey,
           templateSlug: record?.templateSlug ?? null,
           templateName: record?.templateName ?? null,
+          executionStrategyKind: record?.executionStrategyKind ?? null,
           envKeys: record?.envKeys ?? [],
         }),
         {
@@ -121,7 +181,29 @@ export async function GET(
     const response = await buildSessionView(req, sandbox, session);
     response.templateSlug = record?.templateSlug ?? null;
     response.templateName = record?.templateName ?? null;
-    response.envKeys = record?.envKeys ?? [];
+    response.executionStrategyKind = record?.executionStrategyKind ?? null;
+    response.envKeys = normalizeStringArray(record?.envKeys);
+
+    if (
+      response.status !== "running" ||
+      response.error != null ||
+      response.tasks.length === 0 ||
+      response.phase === "stalled"
+    ) {
+      logSessionDiagnostic({
+        event: "view_route_anomalous_response",
+        data: {
+          httpStatus: 200,
+          sandboxId: viewData.sandboxId,
+          sessionKey: viewData.sessionKey,
+          viewerUserId: user.id,
+          record: summarizeOwnedSessionRecordForDiagnostics(record),
+          state: summarizeSessionStateForDiagnostics(state),
+          response: summarizeSessionViewForDiagnostics(response),
+        },
+      });
+    }
+
     return Response.json(response, {
       headers: { "Cache-Control": "no-store" },
     });
@@ -133,11 +215,24 @@ export async function GET(
       const record = sessionKeyForFallback
         ? await getOwnedSession(sessionKeyForFallback).catch(() => null)
         : null;
+      logSessionDiagnostic({
+        event: "view_route_sandbox_missing",
+        level: "warn",
+        data: {
+          httpStatus: 200,
+          sandboxId: sandboxIdForFallback,
+          sessionKey: sessionKeyForFallback,
+          viewerUserId: user.id,
+          error: error.message,
+          record: summarizeOwnedSessionRecordForDiagnostics(record),
+        },
+      });
       return Response.json(
         stoppedView(req, viewToken, sandboxIdForFallback, {
           sessionKey: sessionKeyForFallback,
           templateSlug: record?.templateSlug ?? null,
           templateName: record?.templateName ?? null,
+          executionStrategyKind: record?.executionStrategyKind ?? null,
           envKeys: record?.envKeys ?? [],
         }),
         {
@@ -146,6 +241,17 @@ export async function GET(
       );
     }
 
+    logSessionDiagnostic({
+      event: "view_route_failed",
+      level: "error",
+      data: {
+        httpStatus: 500,
+        sandboxId: sandboxIdForFallback,
+        sessionKey: sessionKeyForFallback,
+        viewerUserId: user.id,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
     console.error("Failed to read public sandbox view:", error);
     return Response.json(
       {

@@ -31,6 +31,15 @@ import type {
   RuntimeName,
   TemplateSummary,
 } from "./types.js";
+import {
+  applyExecutionStrategyEnvironmentDefaults,
+  executionStrategyAcceptsPrompts,
+} from "./execution-strategy";
+import type {
+  ExecutionStrategy,
+  TemplateEnvironmentFieldInputType,
+  TemplateEnvironmentFieldOption,
+} from "./template-service-types.js";
 
 const DEFAULT_TEMPLATE_PORTS = [3000, 5173, 8888];
 const VALIDATION_TEMPLATE_DIR = "/vercel/sandbox/sandcastle-template";
@@ -41,6 +50,11 @@ export interface SandcastleTemplateEnvHint {
   key: string;
   label: string;
   description: string;
+  required?: boolean;
+  secret?: boolean;
+  defaultValue?: string | null;
+  inputType?: TemplateEnvironmentFieldInputType;
+  options?: TemplateEnvironmentFieldOption[];
 }
 
 export type SandcastleTemplateSource =
@@ -62,6 +76,7 @@ export interface SandcastleTemplateDefinition {
   source: SandcastleTemplateSource;
   defaultRuntime: RuntimeName;
   supportedRuntimes: RuntimeName[];
+  executionStrategy: ExecutionStrategy;
   launchLabel: string;
   ports: number[];
   timeoutMs: number;
@@ -84,16 +99,75 @@ export interface SandcastleTemplateDefinition {
 
 export type SandcastleTemplateCatalogEntry = Omit<
   SandcastleTemplateDefinition,
-  "bootstrap" | "buildInitialPrompt" | "source"
+  "bootstrap" | "buildInitialPrompt" | "source" | "executionStrategy"
 > & {
   sourceKind: SandcastleTemplateSource["kind"];
+  executionStrategyKind: ExecutionStrategy["kind"];
+  acceptsPrompts: boolean;
 };
 
 export interface TemplateEnvironmentDefaults {
   templateValidationUrl?: string;
 }
 
-export const DEFAULT_TEMPLATE_SLUG = "standard";
+export const DEFAULT_TEMPLATE_SLUG = "claude-code";
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5";
+const DEFAULT_OPENAI_MODEL = "gpt-5.2-codex";
+const DEFAULT_WORDCOUNT_METHOD = "wc-words";
+
+const CLAUDE_MODEL_OPTIONS: TemplateEnvironmentFieldOption[] = [
+  {
+    value: "claude-sonnet-4-5",
+    label: "Claude Sonnet 4.5",
+    description: "Balanced default for most coding tasks.",
+  },
+  {
+    value: "claude-opus-4-1",
+    label: "Claude Opus 4.1",
+    description: "Stronger reasoning for harder tasks.",
+  },
+  {
+    value: "claude-haiku-4-5",
+    label: "Claude Haiku 4.5",
+    description: "Faster and cheaper for lighter work.",
+  },
+];
+
+const OPENAI_MODEL_OPTIONS: TemplateEnvironmentFieldOption[] = [
+  {
+    value: "gpt-5.2-codex",
+    label: "GPT-5.2 Codex",
+    description: "Latest high-capability Codex model.",
+  },
+  {
+    value: "gpt-5-codex",
+    label: "GPT-5 Codex",
+    description: "Stable default Codex model.",
+  },
+  {
+    value: "gpt-5.1-codex-mini",
+    label: "GPT-5.1 Codex Mini",
+    description: "Faster and cheaper for lighter tasks.",
+  },
+];
+
+const WORDCOUNT_METHOD_OPTIONS: TemplateEnvironmentFieldOption[] = [
+  {
+    value: "wc-words",
+    label: "wc -w",
+    description: "Use wc -w for the fastest shell-native word count.",
+  },
+  {
+    value: "awk-fields",
+    label: "awk fields",
+    description: "Use awk and sum whitespace-delimited fields line by line.",
+  },
+  {
+    value: "grep-tokens",
+    label: "grep tokens",
+    description: "Tokenize non-whitespace sequences with grep before counting.",
+  },
+];
 
 function noOpBootstrap(): Promise<void> {
   return Promise.resolve();
@@ -248,6 +322,92 @@ function buildCodexPrompt(args: {
   environment: Record<string, string>;
 }): string {
   return buildProviderTemplatePrompt("codex", args);
+}
+
+function buildWebsiteDeepDivePrompt(args: {
+  prompt: string;
+  environment: Record<string, string>;
+}): string {
+  const envKeys = Object.keys(args.environment).sort();
+
+  return [
+    "This sandbox was created from the Sandcastle Website Deep Dive template.",
+    `Base template files live in ${PROVIDER_TEMPLATE_DIR}, and this workflow inherits the Claude Code artifact contract.`,
+    "",
+    "Required workflow:",
+    "1. Identify the primary website or URL targets from the user request before drawing conclusions.",
+    "2. Inspect the site directly with pragmatic tooling such as curl, fetched HTML, headers, and repository clues when available.",
+    "3. Analyze the site's positioning, audience, navigation, content structure, trust signals, forms, SEO metadata, and likely technical stack.",
+    "4. Keep request.json, result.json, and result.md aligned with the investigation as you learn more.",
+    "5. End with a concise brief covering what the site does, who it serves, how it appears to be built, and the highest-signal opportunities or risks.",
+    "",
+    envKeys.length > 0
+      ? `Launch environment variables available to the sandbox: ${envKeys.join(", ")}. Never print secret values directly.`
+      : "No launch environment variables were configured for this sandbox.",
+    "",
+    `User request: ${args.prompt.trim()}`,
+  ].join("\n");
+}
+
+const WORDCOUNT_TEMPLATE_FILE = "/vercel/sandbox/wordcount.txt";
+const WORDCOUNT_TEMPLATE_COMMAND = `
+target="\${WORDCOUNT_TARGET:-${WORDCOUNT_TEMPLATE_FILE}}"
+method="\${WORDCOUNT_METHOD:-${DEFAULT_WORDCOUNT_METHOD}}"
+
+if [ ! -f "$target" ]; then
+  echo "Target file not found: $target" >&2
+  exit 2
+fi
+
+case "$method" in
+  wc-words)
+    count=$(wc -w < "$target" | tr -d '[:space:]')
+    ;;
+  awk-fields)
+    count=$(awk '{ total += NF } END { print total + 0 }' "$target")
+    ;;
+  grep-tokens)
+    count=$(grep -oE '[^[:space:]]+' "$target" | wc -l | tr -d '[:space:]')
+    ;;
+  *)
+    echo "Unsupported WORDCOUNT_METHOD: $method" >&2
+    exit 2
+    ;;
+esac
+
+printf 'Method: %s\nFile: %s\nWord count: %s\n' "$method" "$target" "$count"
+`.trim();
+
+async function bootstrapWordcountTemplate(
+  sandbox: Sandbox
+): Promise<void> {
+  await sandbox.writeFiles([
+    {
+      path: WORDCOUNT_TEMPLATE_FILE,
+      content: Buffer.from(["alpha", "beta", "gamma", "delta", ""].join("\n")),
+    },
+    {
+      path: "/vercel/sandbox/README.wordcount.md",
+      content: Buffer.from(
+        [
+          "# Wordcount Template",
+          "",
+          "This template runs a shell command with two config-driven inputs:",
+          "",
+          `- Prompt input via \`WORDCOUNT_TARGET\`, defaulting to \`${WORDCOUNT_TEMPLATE_FILE}\``,
+          `- Select input via \`WORDCOUNT_METHOD\`, defaulting to \`${DEFAULT_WORDCOUNT_METHOD}\``,
+          "",
+          "Available methods:",
+          "- wc-words",
+          "- awk-fields",
+          "- grep-tokens",
+          "",
+          "It exists to validate prompt-capable shell-command execution and template-config selects end to end.",
+          "",
+        ].join("\n")
+      ),
+    },
+  ]);
 }
 
 function buildValidationReadme(): string {
@@ -590,31 +750,6 @@ function buildWebpageInspectorPrompt(args: {
 
 export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
   {
-    slug: "standard",
-    name: "Standard",
-    status: "live",
-    summary:
-      "The default Sandcastle coding environment used for previews, installs, and iterative agent work.",
-    purpose:
-      "General-purpose coding, preview servers, dependency installs, and follow-up prompts.",
-    source: {
-      kind: "snapshot",
-      snapshotEnvVar: "BASE_SNAPSHOT_ID",
-      snapshotRuntime: "node24",
-    },
-    defaultRuntime: "node24",
-    supportedRuntimes: ["node24", "node22", "python3.13"],
-    launchLabel: "Create sandbox",
-    ports: DEFAULT_TEMPLATE_PORTS,
-    timeoutMs: ms("30m"),
-    vcpus: 4,
-    promptPlaceholder:
-      "Describe what this sandbox should do first. Example: scaffold a Next.js app and start the dev server.",
-    envHints: [],
-    bootstrap: noOpBootstrap,
-    buildInitialPrompt: ({ prompt }) => prompt.trim(),
-  },
-  {
     slug: "claude-code",
     name: "Claude Code",
     status: "live",
@@ -629,6 +764,7 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
     },
     defaultRuntime: "node24",
     supportedRuntimes: ["node24", "node22"],
+    executionStrategy: { kind: "claude-agent" },
     launchLabel: "Launch Claude Code",
     ports: DEFAULT_TEMPLATE_PORTS,
     timeoutMs: ms("30m"),
@@ -637,7 +773,23 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
       "Describe the coding work to perform. You may optionally include a ```sandcastle-request JSON block for structured inputs.",
     defaultPrompt:
       "Inspect the workspace, carry out the requested coding task, and keep request/result artifacts up to date.",
-    envHints: [],
+    envHints: [
+      {
+        key: "ANTHROPIC_MODEL",
+        label: "Anthropic model",
+        description: "Select which Claude model powers this run.",
+        defaultValue: DEFAULT_CLAUDE_MODEL,
+        inputType: "select",
+        options: CLAUDE_MODEL_OPTIONS,
+      },
+      {
+        key: "ANTHROPIC_API_KEY",
+        label: "Anthropic API key",
+        description:
+          "Optional. Overrides the platform default Anthropic key for this sandbox.",
+        secret: true,
+      },
+    ],
     bootstrap: async (sandbox, context) =>
       bootstrapProviderTemplate("claude-code", sandbox, context),
     buildInitialPrompt: buildClaudeCodePrompt,
@@ -647,9 +799,9 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
     name: "Codex",
     status: "live",
     summary:
-      "An integration-first coding template with a stricter structured request/result contract and stable artifact paths.",
+      "An OpenAI-backed coding template with stable request/result artifacts for Sandcastle tasks.",
     purpose:
-      "Machine-assisted workflows, structured task exchange, and integrations that need deterministic request/result files without changing the Sandcastle API.",
+      "General coding, app work, debugging, and structured OpenAI-based tasks where the user wants Codex-style behavior.",
     source: {
       kind: "snapshot",
       snapshotEnvVar: "BASE_SNAPSHOT_ID",
@@ -657,6 +809,7 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
     },
     defaultRuntime: "node24",
     supportedRuntimes: ["node24", "node22"],
+    executionStrategy: { kind: "codex-agent" },
     launchLabel: "Launch Codex",
     ports: DEFAULT_TEMPLATE_PORTS,
     timeoutMs: ms("30m"),
@@ -665,71 +818,98 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
       "Describe the coding work to perform. For advanced integrations, include a ```sandcastle-request JSON block.",
     defaultPrompt:
       "Materialize the structured request, carry out the requested work, and write deterministic result artifacts before finishing.",
-    envHints: [],
+    envHints: [
+      {
+        key: "OPENAI_MODEL",
+        label: "OpenAI model",
+        description: "Select which OpenAI coding model powers this run.",
+        defaultValue: DEFAULT_OPENAI_MODEL,
+        inputType: "select",
+        options: OPENAI_MODEL_OPTIONS,
+      },
+      {
+        key: "OPENAI_API_KEY",
+        label: "OpenAI API key",
+        description:
+          "Optional. Overrides the platform default OpenAI key for this sandbox.",
+        secret: true,
+      },
+    ],
     bootstrap: async (sandbox, context) =>
       bootstrapProviderTemplate("codex", sandbox, context),
     buildInitialPrompt: buildCodexPrompt,
   },
   {
-    slug: "shell-scripts-validation",
-    name: "Shell Scripts Validation",
+    slug: "website-deep-dive",
+    name: "Website Deep Dive",
     status: "live",
     summary:
-      "A validation sandbox that ships shell scripts proving template boot, environment injection, and request wiring are working correctly.",
+      "A Claude Code-based research template for understanding a website's product, positioning, UX, and technical signals.",
     purpose:
-      "Release validation, template smoke checks, and proving that launch-time API keys are usable inside the sandbox.",
+      "Website teardown work, product understanding, competitive research, and technical reconnaissance from a live site or URL set.",
     source: {
       kind: "snapshot",
       snapshotEnvVar: "BASE_SNAPSHOT_ID",
       snapshotRuntime: "node24",
     },
     defaultRuntime: "node24",
-    supportedRuntimes: ["node24"],
-    launchLabel: "Run validation template",
-    ports: [],
-    timeoutMs: ms("20m"),
-    vcpus: 2,
+    supportedRuntimes: ["node24", "node22"],
+    executionStrategy: { kind: "claude-agent" },
+    launchLabel: "Launch deep dive",
+    ports: DEFAULT_TEMPLATE_PORTS,
+    timeoutMs: ms("30m"),
+    vcpus: 4,
     promptPlaceholder:
-      "Optional. Leave blank to run the built-in validation flow, or add extra checks you want the sandbox to perform.",
+      "Give the target website and what you want to learn. Example: deep dive https://example.com and tell me what the product does, how the site is structured, and what tech it appears to use.",
     defaultPrompt:
-      "Run the validation scripts and summarize whether template setup, environment injection, and outbound request support are working.",
+      "Deep dive the target website from the user request and summarize what the company does, who it serves, how the site is structured, and what technical or UX signals stand out.",
     envHints: [
       {
-        key: "VALIDATION_REQUEST_URL",
-        label: "Validation request URL",
-        description:
-          "Optional. Defaults to Sandcastle's own /api/template-validation endpoint.",
+        key: "ANTHROPIC_MODEL",
+        label: "Anthropic model",
+        description: "Select which Claude model powers this deep dive.",
+        defaultValue: DEFAULT_CLAUDE_MODEL,
+        inputType: "select",
+        options: CLAUDE_MODEL_OPTIONS,
       },
       {
-        key: "VALIDATION_API_KEY",
-        label: "Validation API key",
+        key: "ANTHROPIC_API_KEY",
+        label: "Anthropic API key",
         description:
-          "Optional bearer or raw API key used by verify-request.sh.",
+          "Optional. Overrides the platform default Anthropic key for this sandbox.",
+        secret: true,
       },
       {
-        key: "VALIDATION_AUTH_HEADER_NAME",
+        key: "WEBSITE_AUTH_TOKEN",
+        label: "Website auth token",
+        description:
+          "Optional token for authenticated sites, previews, or staging environments.",
+      },
+      {
+        key: "WEBSITE_AUTH_HEADER_NAME",
         label: "Auth header name",
         description:
-          "Optional. Defaults to Authorization.",
+          "Optional. Defaults to Authorization when manually building authenticated requests.",
       },
       {
-        key: "VALIDATION_AUTH_SCHEME",
+        key: "WEBSITE_AUTH_SCHEME",
         label: "Auth scheme",
         description:
           "Optional. Defaults to Bearer when using Authorization.",
       },
     ],
-    bootstrap: bootstrapValidationTemplate,
-    buildInitialPrompt: buildValidationPrompt,
+    bootstrap: async (sandbox, context) =>
+      bootstrapProviderTemplate("claude-code", sandbox, context),
+    buildInitialPrompt: buildWebsiteDeepDivePrompt,
   },
   {
-    slug: "webpage-inspector",
-    name: "Webpage Inspector",
+    slug: "wordcount",
+    name: "Wordcount",
     status: "live",
     summary:
-      "Inspects a user-provided webpage URL, runs structural diagnostics, and renders a live HTML report in the sandbox preview.",
+      "A shell-command template that counts words in a target sandbox file using a selectable counting method.",
     purpose:
-      "Webpage audits, content inspection, SEO and metadata checks, header diagnostics, and browser-deliverable HTML reports for SHGO workflows.",
+      "Exercise prompt-capable shell-command execution and config-driven select inputs against a concrete file path without involving an AI agent.",
     source: {
       kind: "snapshot",
       snapshotEnvVar: "BASE_SNAPSHOT_ID",
@@ -737,36 +917,33 @@ export const sandcastleTemplates: SandcastleTemplateDefinition[] = [
     },
     defaultRuntime: "node24",
     supportedRuntimes: ["node24"],
-    launchLabel: "Inspect webpage",
-    ports: [WEBPAGE_INSPECTOR_PORT],
-    timeoutMs: ms("20m"),
+    executionStrategy: {
+      kind: "shell-command",
+      cmd: "bash",
+      args: ["-lc", WORDCOUNT_TEMPLATE_COMMAND],
+      cwd: "/vercel/sandbox",
+      promptMode: "env",
+      promptEnvKey: "WORDCOUNT_TARGET",
+    },
+    launchLabel: "Run wordcount",
+    ports: [],
+    timeoutMs: ms("10m"),
     vcpus: 2,
     promptPlaceholder:
-      "Provide the target URL and what you want inspected. Example: inspect https://example.com and focus on metadata, headings, and security headers.",
-    defaultPrompt:
-      "Inspect the target webpage URL from the user request, generate the HTML report, and summarize the most important diagnostics.",
+      `Optional path to a file inside the sandbox. Defaults to ${WORDCOUNT_TEMPLATE_FILE}.`,
+    defaultPrompt: WORDCOUNT_TEMPLATE_FILE,
     envHints: [
       {
-        key: "PAGE_AUDIT_AUTH_TOKEN",
-        label: "Page auth token",
-        description:
-          "Optional token for authenticated pages or internal staging URLs.",
-      },
-      {
-        key: "PAGE_AUDIT_AUTH_HEADER_NAME",
-        label: "Auth header name",
-        description:
-          "Optional. Defaults to Authorization.",
-      },
-      {
-        key: "PAGE_AUDIT_AUTH_SCHEME",
-        label: "Auth scheme",
-        description:
-          "Optional. Defaults to Bearer when using Authorization.",
+        key: "WORDCOUNT_METHOD",
+        label: "Counting method",
+        description: "Select how the shell command should count words.",
+        defaultValue: DEFAULT_WORDCOUNT_METHOD,
+        inputType: "select",
+        options: WORDCOUNT_METHOD_OPTIONS,
       },
     ],
-    bootstrap: bootstrapWebpageInspectorTemplate,
-    buildInitialPrompt: buildWebpageInspectorPrompt,
+    bootstrap: bootstrapWordcountTemplate,
+    buildInitialPrompt: ({ prompt }) => prompt.trim(),
   },
 ];
 
@@ -786,13 +963,18 @@ export function listSandcastleTemplateCatalog(): SandcastleTemplateCatalogEntry[
     sourceKind: template.source.kind,
     defaultRuntime: template.defaultRuntime,
     supportedRuntimes: [...template.supportedRuntimes],
+    executionStrategyKind: template.executionStrategy.kind,
+    acceptsPrompts: executionStrategyAcceptsPrompts(template.executionStrategy),
     launchLabel: template.launchLabel,
     ports: [...template.ports],
     timeoutMs: template.timeoutMs,
     vcpus: template.vcpus,
     promptPlaceholder: template.promptPlaceholder,
     defaultPrompt: template.defaultPrompt,
-    envHints: template.envHints.map((hint) => ({ ...hint })),
+    envHints: template.envHints.map((hint) => ({
+      ...hint,
+      options: hint.options?.map((option) => ({ ...option })),
+    })),
   }));
 }
 
@@ -896,9 +1078,20 @@ export function resolveTemplatePrompt(
   prompt: string,
   environment: Record<string, string>
 ): string {
+  const acceptsPrompts = executionStrategyAcceptsPrompts(
+    template.executionStrategy
+  );
+  if (!acceptsPrompts) {
+    return "";
+  }
+
   const resolvedPrompt = prompt.trim() || (template.defaultPrompt ?? "");
   if (!resolvedPrompt) {
     throw new Error(`Template '${template.name}' requires an initial prompt.`);
+  }
+
+  if (template.executionStrategy.kind === "shell-command") {
+    return resolvedPrompt;
   }
 
   return template.buildInitialPrompt({
@@ -912,15 +1105,22 @@ export function resolveTemplateEnvironment(
   environment: Record<string, string>,
   defaults: TemplateEnvironmentDefaults = {}
 ): Record<string, string> {
+  void defaults;
   const resolved = { ...environment };
 
-  if (
-    template.slug === "shell-scripts-validation" &&
-    !resolved.VALIDATION_REQUEST_URL &&
-    defaults.templateValidationUrl
-  ) {
-    resolved.VALIDATION_REQUEST_URL = defaults.templateValidationUrl;
+  for (const field of template.envHints) {
+    const currentValue = resolved[field.key];
+    if (
+      (!currentValue || !currentValue.trim()) &&
+      typeof field.defaultValue === "string" &&
+      field.defaultValue.trim()
+    ) {
+      resolved[field.key] = field.defaultValue;
+    }
   }
 
-  return resolved;
+  return applyExecutionStrategyEnvironmentDefaults(
+    template.executionStrategy,
+    resolved
+  );
 }

@@ -60,6 +60,7 @@ export function collectStartupValidationReport(): StartupValidationReport {
   const checks: StartupValidationCheck[] = [
     requiredEnvCheck("agent_auth", "AGENT_API_KEY"),
     requiredEnvCheck("anthropic_upstream", "ANTHROPIC_API_KEY"),
+    requiredEnvCheck("openai_upstream", "OPENAI_API_KEY"),
     validateCheck(
       "token_signing",
       () => assertSessionStartTokenConfiguration(),

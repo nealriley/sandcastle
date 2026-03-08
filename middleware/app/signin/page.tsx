@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 
 function resolveCallbackUrl(callbackUrl?: string): string {
   if (!callbackUrl || !callbackUrl.startsWith("/")) {
-    return "/sandboxes";
+    return "/dashboard";
   }
 
   return callbackUrl;

@@ -11,9 +11,11 @@ import {
   isRateLimitError,
   rateLimitResponse,
 } from "@/lib/rate-limit";
+import { executionStrategyAllowsFollowUps } from "@/lib/execution-strategy";
 import { findOwnedSessionBySandboxId } from "@/lib/session-ownership";
 import { normalizePairingCode, readPairingCode } from "@/lib/pairing";
 import { restoreOwnedSandboxSession } from "@/lib/owned-sandbox";
+import type { ExecutionStrategy } from "@/lib/template-service-types";
 import { buildConnectorUrl } from "@/lib/url";
 import { startSandboxFollowUpTask } from "@/lib/sandbox-follow-up";
 import type { SessionOwnershipRecord, SessionToken, TaskResponse } from "@/lib/types";
@@ -145,6 +147,19 @@ export async function POST(req: NextRequest) {
         { status: 404 }
       );
     }
+    const followUpStrategy: ExecutionStrategy = {
+      kind:
+        record.executionStrategyKind === "codex-agent"
+          ? "codex-agent"
+          : "claude-agent",
+    };
+
+    if (!executionStrategyAllowsFollowUps(record.executionStrategyKind ?? null)) {
+      return Response.json(
+        { error: "This template does not accept follow-up prompts." },
+        { status: 400 }
+      );
+    }
 
     const session = await restoreOwnedSandboxSession(record);
     const fallbackSession = session ?? fallbackSessionToken(record);
@@ -175,7 +190,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const response = await startSandboxFollowUpTask(req, session, prompt);
+    const response = await startSandboxFollowUpTask(
+      req,
+      session,
+      prompt,
+      followUpStrategy
+    );
     return Response.json(response, { status: 202 });
   } catch (error) {
     if (isRateLimitError(error)) {

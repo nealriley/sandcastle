@@ -1,30 +1,23 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { readError } from "@/lib/fetch-utils";
+import {
+  StatusBadge,
+  statusToVariant,
+  PhaseBadge,
+  phaseToVariant,
+} from "@/app/components/status-badge";
 
-type TaskStatus =
-  | "accepted"
-  | "running"
-  | "complete"
-  | "failed"
-  | "stopped";
+/* ─── Types ─────────────────────────────────────────────────────────── */
+
+type TaskStatus = "accepted" | "running" | "complete" | "failed" | "stopped";
 
 type TaskPhase =
-  | "queued"
-  | "booting"
-  | "prompting"
-  | "thinking"
-  | "coding"
-  | "installing"
-  | "preview-starting"
-  | "waiting-for-input"
-  | "stalled"
-  | "complete"
-  | "failed"
-  | "stopped";
+  | "queued" | "booting" | "prompting" | "thinking" | "coding"
+  | "installing" | "preview-starting" | "waiting-for-input"
+  | "stalled" | "complete" | "failed" | "stopped";
 
-type PreviewStatus = "not-ready" | "starting" | "ready";
 type ViewTab = "console" | "thinking" | "response" | "activity";
 
 interface SessionViewTask {
@@ -61,6 +54,7 @@ interface SessionViewResponse {
   sandboxUrl: string;
   templateSlug: string | null;
   templateName: string | null;
+  executionStrategyKind: "claude-agent" | "codex-agent" | "shell-command" | null;
   envKeys: string[];
   status: TaskStatus;
   phase: TaskPhase;
@@ -72,7 +66,7 @@ interface SessionViewResponse {
   lastLogAt: number | null;
   previewUrl: string | null;
   previewUrls: SessionViewPreview[];
-  previewStatus: PreviewStatus;
+  previewStatus: "not-ready" | "starting" | "ready";
   previewHint: string | null;
   result: string | null;
   error: string | null;
@@ -84,20 +78,17 @@ interface SessionViewResponse {
   tasks: SessionViewTask[];
 }
 
-type FeedbackState = {
-  tone: "neutral" | "danger";
-  text: string;
-} | null;
+/* ─── Helpers ───────────────────────────────────────────────────────── */
 
-const POLL_INTERVAL_MS = 2500;
+const POLL_MS = 2500;
 
 const phaseLabels: Record<TaskPhase, string> = {
   queued: "Queued",
-  booting: "Booting sandbox",
-  prompting: "Starting Claude",
+  booting: "Booting",
+  prompting: "Starting agent",
   thinking: "Thinking",
   coding: "Coding",
-  installing: "Installing dependencies",
+  installing: "Installing deps",
   "preview-starting": "Starting preview",
   "waiting-for-input": "Waiting for input",
   stalled: "Stalled",
@@ -106,672 +97,757 @@ const phaseLabels: Record<TaskPhase, string> = {
   stopped: "Stopped",
 };
 
-const previewLabels: Record<PreviewStatus, string> = {
-  "not-ready": "Not ready",
-  starting: "Starting",
-  ready: "Ready",
-};
-
-function formatDateTime(ts: number | null): string {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleString("en-US", {
-    hour12: false,
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function formatTime(ts: number | null): string {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+function statusLabel(s: TaskStatus): string {
+  return { accepted: "Accepted", running: "Running", complete: "Complete", failed: "Failed", stopped: "Stopped" }[s];
 }
 
 function timeAgo(ts: number | null): string {
-  if (!ts) return "—";
-
-  const totalSeconds = Math.floor((Date.now() - ts) / 1000);
-  if (totalSeconds < 60) return `${Math.max(totalSeconds, 1)}s ago`;
-
-  const minutes = Math.floor(totalSeconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0
-    ? `${hours}h ${remainingMinutes}m ago`
-    : `${hours}h ago`;
+  if (!ts) return "";
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return `${Math.max(s, 1)}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m ago`;
 }
 
-function statusLabel(status: TaskStatus): string {
-  switch (status) {
-    case "accepted":
-      return "Accepted";
-    case "running":
-      return "Running";
-    case "complete":
-      return "Complete";
-    case "failed":
-      return "Failed";
-    default:
-      return "Stopped";
-  }
+function formatDuration(startMs: number | null): string {
+  if (!startMs) return "\u2014";
+  const s = Math.floor((Date.now() - startMs) / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
 }
 
-function statusColor(status: TaskStatus): string {
-  switch (status) {
-    case "accepted":
-    case "running":
-      return "#2563eb";
-    case "complete":
-      return "#0f766e";
-    case "failed":
-      return "#dc2626";
-    default:
-      return "#475569";
-  }
+function fmtTime(ts: number | null): string {
+  if (!ts) return "";
+  return new Date(ts).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function phaseColor(phase: TaskPhase): string {
-  switch (phase) {
-    case "thinking":
-      return "#7c3aed";
-    case "preview-starting":
-      return "#2563eb";
-    case "complete":
-      return "#0f766e";
-    case "failed":
-    case "stalled":
-      return "#dc2626";
-    default:
-      return "#475569";
-  }
-}
-
-function badgeStyle(color: string): CSSProperties {
-  return {
-    color,
-    borderColor: `${color}33`,
-    backgroundColor: `${color}12`,
-  };
-}
-
-function truncate(value: string | null, maxLength = 120): string {
-  if (!value) {
-    return "—";
-  }
-
-  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
-}
-
-function formatEnvKeys(keys: string[] | null | undefined): string {
-  if (!keys || keys.length === 0) {
-    return "None";
-  }
-
-  return keys.join(", ");
+function truncate(v: string | null, n = 120): string {
+  if (!v) return "\u2014";
+  return v.length > n ? `${v.slice(0, n - 3)}\u2026` : v;
 }
 
 function logTypeLabel(type: string): string {
-  switch (type) {
-    case "thinking_delta":
-      return "Thinking";
-    case "response_delta":
-      return "Response";
-    case "tool_input_delta":
-      return "Tool input";
-    case "assistant":
-      return "Assistant";
-    case "tool_use":
-      return "Tool";
-    case "sdk_status":
-      return "SDK status";
-    case "sdk_system":
-      return "SDK system";
-    case "task_progress":
-      return "Task progress";
-    case "tool_progress":
-      return "Tool progress";
-    case "runner_warning":
-      return "Runner warning";
-    case "error":
-      return "Error";
-    default:
-      return type;
+  const map: Record<string, string> = {
+    thinking_delta: "think", response_delta: "resp", tool_input_delta: "input",
+    assistant: "asst", tool_use: "tool", sdk_status: "sdk", sdk_system: "sys",
+    task_progress: "task", tool_progress: "tool", runner_warning: "warn", error: "err",
+  };
+  return map[type] ?? type;
+}
+
+function isAlive(s?: TaskStatus): boolean {
+  return s === "accepted" || s === "running";
+}
+
+function dotVariant(s: TaskStatus): string {
+  if (isAlive(s)) return "active";
+  if (s === "complete") return "complete";
+  if (s === "failed") return "error";
+  return "idle";
+}
+
+function phaseIcon(phase: TaskPhase): string {
+  switch (phase) {
+    case "thinking": return "\u25C6";
+    case "coding": return "\u27E8\u27E9";
+    case "installing": return "\u2193";
+    case "preview-starting": return "\u25CE";
+    case "waiting-for-input": return "\u23F8";
+    case "complete": return "\u2713";
+    case "failed": return "\u2715";
+    case "stopped": return "\u25A0";
+    default: return "\u25CF";
   }
 }
 
-async function readError(response: Response): Promise<string> {
-  const body = (await response.json().catch(() => ({}))) as { error?: string };
-  return body.error ?? `HTTP ${response.status}`;
+function getPhaseColor(phase?: TaskPhase): string {
+  switch (phase) {
+    case "thinking": return "#bc8cff";
+    case "coding": return "#58a6ff";
+    case "installing": return "#d29922";
+    case "preview-starting": case "waiting-for-input": return "#58a6ff";
+    case "complete": return "#3fb950";
+    case "failed": case "stalled": return "#f85149";
+    case "stopped": return "#6e7681";
+    default: return "#58a6ff";
+  }
 }
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function asPreviewArray(value: unknown): SessionViewPreview[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    const port = (item as { port?: unknown }).port;
+    const url = (item as { url?: unknown }).url;
+    if (typeof port !== "number" || typeof url !== "string") {
+      return [];
+    }
+
+    return [{ port, url }];
+  });
+}
+
+function asLogEntryArray(value: unknown): SessionLogEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    const entry = item as Record<string, unknown>;
+    if (
+      typeof entry.ts !== "number" ||
+      typeof entry.type !== "string" ||
+      typeof entry.text !== "string"
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        ts: entry.ts,
+        type: entry.type,
+        phase:
+          entry.phase === "queued" ||
+          entry.phase === "booting" ||
+          entry.phase === "prompting" ||
+          entry.phase === "thinking" ||
+          entry.phase === "coding" ||
+          entry.phase === "installing" ||
+          entry.phase === "preview-starting" ||
+          entry.phase === "waiting-for-input" ||
+          entry.phase === "stalled" ||
+          entry.phase === "complete" ||
+          entry.phase === "failed" ||
+          entry.phase === "stopped"
+            ? entry.phase
+            : null,
+        input: typeof entry.input === "string" ? entry.input : null,
+        idleMs: typeof entry.idleMs === "number" ? entry.idleMs : null,
+        text: entry.text,
+      },
+    ];
+  });
+}
+
+function asTaskArray(value: unknown): SessionViewTask[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    const task = item as Record<string, unknown>;
+    if (
+      typeof task.taskId !== "string" ||
+      typeof task.prompt !== "string" ||
+      typeof task.createdAt !== "number" ||
+      typeof task.updatedAt !== "number"
+    ) {
+      return [];
+    }
+
+    const status =
+      task.status === "accepted" ||
+      task.status === "running" ||
+      task.status === "complete" ||
+      task.status === "failed" ||
+      task.status === "stopped"
+        ? task.status
+        : "failed";
+    const phase =
+      task.phase === "queued" ||
+      task.phase === "booting" ||
+      task.phase === "prompting" ||
+      task.phase === "thinking" ||
+      task.phase === "coding" ||
+      task.phase === "installing" ||
+      task.phase === "preview-starting" ||
+      task.phase === "waiting-for-input" ||
+      task.phase === "stalled" ||
+      task.phase === "complete" ||
+      task.phase === "failed" ||
+      task.phase === "stopped"
+        ? task.phase
+        : "failed";
+
+    return [
+      {
+        taskId: task.taskId,
+        prompt: task.prompt,
+        status,
+        phase,
+        phaseDetail: typeof task.phaseDetail === "string" ? task.phaseDetail : null,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+        completedAt:
+          typeof task.completedAt === "number" ? task.completedAt : null,
+        lastLogAt: typeof task.lastLogAt === "number" ? task.lastLogAt : null,
+        result: typeof task.result === "string" ? task.result : null,
+        error: typeof task.error === "string" ? task.error : null,
+      },
+    ];
+  });
+}
+
+function normalizeSessionViewResponse(raw: unknown): SessionViewResponse {
+  const data =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+
+  const status =
+    data.status === "accepted" ||
+    data.status === "running" ||
+    data.status === "complete" ||
+    data.status === "failed" ||
+    data.status === "stopped"
+      ? data.status
+      : "failed";
+  const phase =
+    data.phase === "queued" ||
+    data.phase === "booting" ||
+    data.phase === "prompting" ||
+    data.phase === "thinking" ||
+    data.phase === "coding" ||
+    data.phase === "installing" ||
+    data.phase === "preview-starting" ||
+    data.phase === "waiting-for-input" ||
+    data.phase === "stalled" ||
+    data.phase === "complete" ||
+    data.phase === "failed" ||
+    data.phase === "stopped"
+      ? data.phase
+      : "failed";
+
+  return {
+    sessionKey: typeof data.sessionKey === "string" ? data.sessionKey : "",
+    sandboxId: typeof data.sandboxId === "string" ? data.sandboxId : "",
+    sandboxUrl: typeof data.sandboxUrl === "string" ? data.sandboxUrl : "",
+    templateSlug: typeof data.templateSlug === "string" ? data.templateSlug : null,
+    templateName: typeof data.templateName === "string" ? data.templateName : null,
+    executionStrategyKind:
+      data.executionStrategyKind === "claude-agent" ||
+      data.executionStrategyKind === "codex-agent" ||
+      data.executionStrategyKind === "shell-command"
+        ? data.executionStrategyKind
+        : null,
+    envKeys: asStringArray(data.envKeys),
+    status,
+    phase,
+    phaseDetail: typeof data.phaseDetail === "string" ? data.phaseDetail : null,
+    currentTaskId: typeof data.currentTaskId === "string" ? data.currentTaskId : null,
+    latestPrompt: typeof data.latestPrompt === "string" ? data.latestPrompt : null,
+    createdAt: typeof data.createdAt === "number" ? data.createdAt : null,
+    updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : null,
+    lastLogAt: typeof data.lastLogAt === "number" ? data.lastLogAt : null,
+    previewUrl: typeof data.previewUrl === "string" ? data.previewUrl : null,
+    previewUrls: asPreviewArray(data.previewUrls),
+    previewStatus:
+      data.previewStatus === "ready" ||
+      data.previewStatus === "starting" ||
+      data.previewStatus === "not-ready"
+        ? data.previewStatus
+        : "not-ready",
+    previewHint: typeof data.previewHint === "string" ? data.previewHint : null,
+    result: typeof data.result === "string" ? data.result : null,
+    error: typeof data.error === "string" ? data.error : null,
+    consoleText: typeof data.consoleText === "string" ? data.consoleText : "",
+    consoleTail: typeof data.consoleTail === "string" ? data.consoleTail : null,
+    liveThinking: typeof data.liveThinking === "string" ? data.liveThinking : null,
+    liveResponse: typeof data.liveResponse === "string" ? data.liveResponse : null,
+    logEntries: asLogEntryArray(data.logEntries),
+    tasks: asTaskArray(data.tasks),
+  };
+}
+
+/* ─── Component ─────────────────────────────────────────────────────── */
 
 export default function SessionViewer({ viewToken }: { viewToken: string }) {
   const [data, setData] = useState<SessionViewResponse | null>(null);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<FeedbackState>(null);
-  const [promptDraft, setPromptDraft] = useState("");
-  const [busyAction, setBusyAction] = useState<"prompt" | "kill" | null>(null);
-  const [activeTab, setActiveTab] = useState<ViewTab>("console");
+  const [fetchErr, setFetchErr] = useState<string | null>(null);
+  const [tab, setTab] = useState<ViewTab>("console");
+  const [killing, setKilling] = useState(false);
+
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [promptFb, setPromptFb] = useState<{ err: boolean; text: string } | null>(null);
+
   const consoleRef = useRef<HTMLPreElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  async function loadState() {
+  /* ── Polling ── */
+  const loadState = useCallback(async () => {
     try {
-      const response = await fetch(
-        `/api/view/${encodeURIComponent(viewToken)}?_t=${Date.now()}`
-      );
-      if (!response.ok) {
-        throw new Error(await readError(response));
-      }
-
-      const next = (await response.json()) as SessionViewResponse;
-      setData(next);
-      setFetchError(null);
-    } catch (error) {
-      setFetchError(
-        error instanceof Error ? error.message : "Network error"
-      );
+      const r = await fetch(`/api/view/${encodeURIComponent(viewToken)}?_t=${Date.now()}`);
+      if (!r.ok) throw new Error(await readError(r));
+      setData(normalizeSessionViewResponse(await r.json()));
+      setFetchErr(null);
+    } catch (e) {
+      setFetchErr(e instanceof Error ? e.message : "Network error");
     }
-  }
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadIfActive() {
-      if (!active) {
-        return;
-      }
-      await loadState();
-    }
-
-    void loadIfActive();
-    const interval = setInterval(() => {
-      void loadIfActive();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
   }, [viewToken]);
 
   useEffect(() => {
-    if (activeTab !== "console") {
-      return;
-    }
+    let active = true;
+    const poll = () => { if (active) void loadState(); };
+    poll();
+    const id = setInterval(poll, POLL_MS);
+    return () => { active = false; clearInterval(id); };
+  }, [loadState]);
 
-    const element = consoleRef.current;
-    if (!element) return;
-    element.scrollTop = element.scrollHeight;
-  }, [activeTab, data?.consoleText]);
+  /* Duration ticker — re-renders every second while session is alive */
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!data?.createdAt || !isAlive(data.status)) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [data?.createdAt, data?.status]);
 
-  const focusTask = data
-    ? data.currentTaskId
-      ? data.tasks.find((task) => task.taskId === data.currentTaskId) ?? null
-      : data.tasks[data.tasks.length - 1] ?? null
-    : null;
-  const recentEntries = data ? [...data.logEntries].slice(-10).reverse() : [];
-  const previewReady = Boolean(data?.previewUrl);
+  /* Auto-scroll console */
+  useEffect(() => {
+    if (tab !== "console") return;
+    const el = consoleRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [tab, data?.consoleText]);
 
-  async function handlePromptSubmit() {
-    if (!data?.sessionKey) {
-      return;
-    }
-
-    const prompt = promptDraft.trim();
-    if (!prompt) {
-      setFeedback({
-        tone: "danger",
-        text: "Enter a prompt before sending it to the sandbox.",
-      });
-      return;
-    }
-
-    setBusyAction("prompt");
-    setFeedback(null);
-
-    try {
-      const response = await fetch(
-        `/api/sandboxes/${encodeURIComponent(data.sessionKey)}/prompt`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        }
-      );
-      if (!response.ok) {
-        throw new Error(await readError(response));
-      }
-
-      setPromptDraft("");
-      setFeedback({
-        tone: "neutral",
-        text: `Started a new task in sandbox ${data.sandboxId}.`,
-      });
-      await loadState();
-    } catch (error) {
-      setFeedback({
-        tone: "danger",
-        text:
-          error instanceof Error ? error.message : "Failed to send sandbox prompt.",
-      });
-    } finally {
-      setBusyAction(null);
+  /* Auto-resize textarea */
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
     }
   }
 
+  /* ── Actions ── */
   async function handleKill() {
-    if (!data?.sessionKey) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Kill sandbox ${data.sandboxId}? This stops the sandbox immediately.`
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setBusyAction("kill");
-    setFeedback(null);
-
+    if (!data?.sessionKey) return;
+    if (!window.confirm(`Stop sandbox ${data.sandboxId}?`)) return;
+    setKilling(true);
     try {
-      const response = await fetch(
-        `/api/sandboxes/${encodeURIComponent(data.sessionKey)}/stop`,
-        { method: "POST" }
-      );
-      if (!response.ok) {
-        throw new Error(await readError(response));
-      }
-
-      setFeedback({
-        tone: "neutral",
-        text: `Sandbox ${data.sandboxId} was stopped.`,
-      });
+      const r = await fetch(`/api/sandboxes/${encodeURIComponent(data.sessionKey)}/stop`, { method: "POST" });
+      if (!r.ok) throw new Error(await readError(r));
       await loadState();
-    } catch (error) {
-      setFeedback({
-        tone: "danger",
-        text:
-          error instanceof Error ? error.message : "Failed to stop sandbox.",
-      });
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Failed to stop");
     } finally {
-      setBusyAction(null);
+      setKilling(false);
     }
   }
 
-  function renderTabContent() {
-    if (activeTab === "console") {
+  async function handleSend() {
+    const prompt = draft.trim();
+    if (!prompt || !data?.sessionKey) {
+      setPromptFb({ err: true, text: "Enter a prompt first." });
+      return;
+    }
+    setSending(true);
+    setPromptFb(null);
+    try {
+      const r = await fetch(`/api/sandboxes/${encodeURIComponent(data.sessionKey)}/prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setDraft("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      setPromptFb({ err: false, text: "Task started." });
+      await loadState();
+    } catch (e) {
+      setPromptFb({ err: true, text: e instanceof Error ? e.message : "Send failed." });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend();
+    }
+  }
+
+  /* ── Derived ── */
+  const alive = isAlive(data?.status);
+  const acceptsFollowUps = data?.executionStrategyKind !== "shell-command";
+  const recentEntries = data ? [...data.logEntries].slice(-20).reverse() : [];
+
+  /* ── Console content renderer ── */
+  function renderConsoleContent() {
+    if (tab === "console") {
+      const hasContent = Boolean(data?.consoleText);
       return (
-        <pre ref={consoleRef} className="console-output">
-          {data?.consoleText || "Waiting for console output from the sandbox..."}
-        </pre>
+        <div className={`sv-pane ${hasContent ? "" : "sv-pane--empty"}`}>
+          <pre ref={consoleRef}>
+            {data?.consoleText || "Waiting for console output\u2026"}
+          </pre>
+        </div>
       );
     }
 
-    if (activeTab === "thinking") {
+    if (tab === "thinking") {
+      const has = Boolean(data?.liveThinking);
       return (
-        <pre className="stream-output">
-          {data?.liveThinking ?? "No visible thinking stream yet."}
-        </pre>
+        <div className={`sv-pane ${has ? "" : "sv-pane--empty"}`}>
+          <pre>{data?.liveThinking ?? "No thinking stream yet."}</pre>
+        </div>
       );
     }
 
-    if (activeTab === "response") {
+    if (tab === "response") {
+      const has = Boolean(data?.liveResponse);
       return (
-        <pre className="stream-output">
-          {data?.liveResponse ?? "No visible response stream yet."}
-        </pre>
+        <div className={`sv-pane ${has ? "" : "sv-pane--empty"}`}>
+          <pre>{data?.liveResponse ?? "No response stream yet."}</pre>
+        </div>
       );
     }
 
+    /* Activity */
     if (recentEntries.length === 0) {
-      return <div className="empty-state">No structured events yet.</div>;
+      return (
+        <div className="sv-pane sv-pane--empty">
+          <pre>No structured events yet.</pre>
+        </div>
+      );
     }
 
     return (
-      <div className="activity-feed">
-        {recentEntries.map((entry, index) => (
-          <div key={`${entry.ts}-${entry.type}-${index}`} className="activity-item">
-            <div className="activity-item__header">
-              <div>
-                <div className="table-note">{logTypeLabel(entry.type)}</div>
-                <div className="activity-item__title">{formatTime(entry.ts)}</div>
-              </div>
-              {entry.phase ? (
-                <Tag color={phaseColor(entry.phase)}>
-                  {phaseLabels[entry.phase]}
-                </Tag>
-              ) : null}
-            </div>
-            <div className="activity-item__body">
-              {entry.text || "No text payload"}
-            </div>
+      <div className="sv-feed">
+        {recentEntries.map((e, i) => (
+          <div key={`${e.ts}-${i}`} className="sv-feed__row">
+            <span className="sv-feed__time">{fmtTime(e.ts)}</span>
+            <span className={`sv-feed__type sv-feed__type--${e.type.replace(/_/g, "-")}`}>{logTypeLabel(e.type)}</span>
+            <span className="sv-feed__text">{e.text || "\u2014"}</span>
+            {e.phase && <span className="sv-feed__phase">{phaseLabels[e.phase]}</span>}
           </div>
         ))}
       </div>
     );
   }
 
+  /* ── Main render ── */
   return (
-    <div className="page-stack">
-      <section className="page-header">
-        <div className="page-header__copy">
-          <div className="page-header__badges">
-            <Tag color={statusColor(data?.status ?? "stopped")}>
-              {data ? statusLabel(data.status) : "Loading"}
-            </Tag>
-            <Tag color={phaseColor(data?.phase ?? "queued")}>
-              {data ? phaseLabels[data.phase] : "Loading phase"}
-            </Tag>
-          </div>
-          <p className="page-kicker">Sandbox</p>
-          <h1 className="page-title">{data?.sandboxId ?? "Loading sandbox"}</h1>
-          <p className="page-subtitle">
-            {data?.phaseDetail ?? "Waiting for the latest sandbox update."}
-          </p>
-        </div>
+    <div
+      className="sv"
+      style={{ "--sv-phase-color": getPhaseColor(data?.phase) } as React.CSSProperties}
+    >
+      {/* ── Phase accent bar (rendered via ::before in CSS) ── */}
 
-        <div className="page-header__actions">
-          <a href="/sandboxes" className="button button--ghost">
-            Back to sandboxes
+      {/* ── Header ── */}
+      <header className="sv-header">
+        <div className="sv-header__left">
+          <a href="/dashboard" className="sv-back" title="Back to Dashboard">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 12L6 8l4-4" />
+            </svg>
           </a>
-          {previewReady ? (
-            <a
-              href={data?.previewUrl ?? "#"}
-              target="_blank"
-              rel="noreferrer"
-              className="button button--secondary"
-            >
-              Open preview
-            </a>
-          ) : null}
-          <button
-            type="button"
-            className="button button--danger"
-            onClick={() => void handleKill()}
-            disabled={
-              !data?.sessionKey ||
-              data?.status === "stopped" ||
-              busyAction === "kill"
-            }
-          >
-            {busyAction === "kill" ? "Killing..." : "Kill sandbox"}
-          </button>
-        </div>
-      </section>
-
-      {fetchError ? <div className="alert alert--error">{fetchError}</div> : null}
-      {feedback ? (
-        <div
-          className={
-            feedback.tone === "danger"
-              ? "alert alert--error"
-              : "alert alert--neutral"
-          }
-        >
-          {feedback.text}
-        </div>
-      ) : null}
-
-      <div className="detail-grid">
-        <section className="panel panel--console">
-          <div className="panel__header panel__header--split">
-            <div>
-              <p className="page-kicker">Workspace</p>
-              <h2 className="panel__title">Live sandbox console</h2>
-            </div>
-            <div className="panel-meta">
-              <span>Updated {timeAgo(data?.updatedAt ?? null)}</span>
-              <span>Last log {timeAgo(data?.lastLogAt ?? null)}</span>
-            </div>
+          <div className="sv-header__identity">
+            <span className={`sv-dot sv-dot--${data ? dotVariant(data.status) : "idle"}`} />
+            <h1 className="sv-header__id">{data?.sandboxId ?? "Loading\u2026"}</h1>
           </div>
+          {data?.templateName && (
+            <>
+              <span className="sv-header__sep" />
+              <span className="sv-header__template">{data.templateName}</span>
+            </>
+          )}
+        </div>
 
-          <div className="tab-bar">
-            {(["console", "thinking", "response", "activity"] as ViewTab[]).map(
-              (tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  className="tab-button"
-                  data-active={activeTab === tab}
-                  onClick={() => setActiveTab(tab)}
+        <div className="sv-header__right">
+          {data && (
+            <div className={`sv-phase sv-phase--${phaseToVariant(data.phase)}`}>
+              <span className="sv-phase__icon">{phaseIcon(data.phase)}</span>
+              <span className="sv-phase__label">{phaseLabels[data.phase]}</span>
+              {data.phaseDetail && (
+                <span className="sv-phase__detail">{data.phaseDetail}</span>
+              )}
+            </div>
+          )}
+
+          {data && data.previewUrls.length > 0 && (
+            <div className="sv-header__previews">
+              {data.previewUrls.map((p) => (
+                <a
+                  key={`${p.port}-${p.url}`}
+                  href={p.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="sv-pill"
                 >
-                  {tab === "console"
-                    ? "Console"
-                    : tab === "thinking"
-                      ? "Thinking"
-                      : tab === "response"
-                        ? "Response"
-                        : "Activity"}
-                </button>
-              )
-            )}
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 2h8v8M14 2L6 10" />
+                  </svg>
+                  :{p.port}
+                </a>
+              ))}
+            </div>
+          )}
+
+          {alive && (
+            <button
+              type="button"
+              className="sv-btn sv-btn--stop"
+              onClick={() => void handleKill()}
+              disabled={killing}
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor">
+                <rect x="3" y="3" width="10" height="10" rx="2" />
+              </svg>
+              {killing ? "Stopping\u2026" : "Stop"}
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* ── Fetch error ── */}
+      {fetchErr && <div className="sv-alert">{fetchErr}</div>}
+
+      {/* ── Body: Console + Sidebar ── */}
+      <div className="sv-body">
+        {/* Console workspace */}
+        <div className="sv-console">
+          <div className="sv-tabs">
+            {(["console", "thinking", "response", "activity"] as ViewTab[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                className="sv-tabs__btn"
+                data-active={tab === t}
+                onClick={() => setTab(t)}
+              >
+                {t === "console" && alive && <span className="sv-tabs__live" />}
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+            <div className="sv-tabs__meta">
+              {data?.lastLogAt && <span>Last log {timeAgo(data.lastLogAt)}</span>}
+            </div>
           </div>
 
-          {data?.error || data?.result ? (
-            <div className={data.error ? "alert alert--error" : "alert alert--success"}>
-              <strong>{data.error ? "Latest error" : "Latest result"}</strong>
-              <div>{data.error ?? data.result}</div>
-            </div>
-          ) : null}
+          {renderConsoleContent()}
 
-          <div className="console-shell">{renderTabContent()}</div>
-
-          <div className="prompt-composer">
-            <div className="panel__header">
+          {/* Result / error banner */}
+          {data?.error && (
+            <div className="sv-banner sv-banner--error">
+              <span className="sv-banner__icon">{"\u2715"}</span>
               <div>
-                <p className="page-kicker">Prompt</p>
-                <h2 className="panel__title">Continue this sandbox</h2>
+                <strong className="sv-banner__label">Error</strong>
+                <p className="sv-banner__text">{data.error}</p>
               </div>
             </div>
+          )}
+          {data?.result && !data.error && (
+            <div className="sv-banner sv-banner--success">
+              <span className="sv-banner__icon">{"\u2713"}</span>
+              <div>
+                <strong className="sv-banner__label">Result</strong>
+                <p className="sv-banner__text">{data.result}</p>
+              </div>
+            </div>
+          )}
 
-            <label className="form-field">
-              <span className="form-label">Follow-up prompt</span>
+          {/* Prompt input */}
+          {data?.sessionKey && alive && acceptsFollowUps && (
+            <div className="sv-input">
+              <span className="sv-input__chevron">&gt;</span>
               <textarea
-                value={promptDraft}
-                onChange={(event) => setPromptDraft(event.target.value)}
-                placeholder={`Send a follow-up prompt to ${data?.sandboxId ?? "this sandbox"}`}
-                rows={4}
-                disabled={
-                  !data?.sessionKey ||
-                  busyAction === "prompt" ||
-                  data?.status === "stopped"
-                }
+                ref={textareaRef}
+                className="sv-input__field"
+                value={draft}
+                onChange={(e) => handleDraftChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Send a follow-up\u2026"
+                rows={1}
+                disabled={sending}
               />
-            </label>
-
-            <div className="page-header__actions">
               <button
                 type="button"
-                className="button button--primary button--small"
-                onClick={() => void handlePromptSubmit()}
-                disabled={
-                  !data?.sessionKey ||
-                  busyAction === "prompt" ||
-                  data?.status === "stopped"
-                }
+                className="sv-input__send"
+                onClick={() => void handleSend()}
+                disabled={sending || !draft.trim()}
+                title="Send (Enter)"
               >
-                {busyAction === "prompt" ? "Sending..." : "Send prompt"}
+                <svg viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M3.105 2.29a.75.75 0 0 1 .814-.12l13.5 6.75a.75.75 0 0 1 0 1.341l-13.5 6.75a.75.75 0 0 1-1.064-.843L4.38 10.5H9.75a.75.75 0 0 0 0-1.5H4.38L2.855 3.233a.75.75 0 0 1 .25-.943Z" />
+                </svg>
               </button>
             </div>
-          </div>
-        </section>
-
-        <aside className="side-rail">
-          <section className="panel">
-            <div className="panel__header">
-              <div>
-                <p className="page-kicker">Overview</p>
-                <h2 className="panel__title">Current state</h2>
-              </div>
+          )}
+          {data?.sessionKey && alive && !acceptsFollowUps && (
+            <div className="sv-input__fb">
+              This template runs a fixed shell command and does not accept follow-up prompts.
             </div>
+          )}
+          {promptFb && (
+            <div className={`sv-input__fb ${promptFb.err ? "sv-input__fb--err" : ""}`}>
+              {promptFb.text}
+            </div>
+          )}
+        </div>
 
-            <dl className="key-value-list">
-              <div>
+        {/* ── Sidebar ── */}
+        <aside className="sv-aside">
+          {/* Session details */}
+          <section className="sv-aside__section">
+            <h3 className="sv-aside__heading">Session</h3>
+            <dl className="sv-meta">
+              <div className="sv-meta__row">
                 <dt>Status</dt>
-                <dd>{data ? statusLabel(data.status) : "Loading"}</dd>
+                <dd>
+                  {data ? (
+                    <StatusBadge variant={statusToVariant(data.status)} pulse={alive}>
+                      {statusLabel(data.status)}
+                    </StatusBadge>
+                  ) : "\u2014"}
+                </dd>
               </div>
-              <div>
-                <dt>Template</dt>
-                <dd>{data?.templateName ?? "Standard"}</dd>
-              </div>
-              <div>
+              <div className="sv-meta__row">
                 <dt>Phase</dt>
-                <dd>{data ? phaseLabels[data.phase] : "Loading"}</dd>
+                <dd>
+                  {data ? (
+                    <PhaseBadge phase={phaseToVariant(data.phase)}>
+                      {phaseLabels[data.phase]}
+                    </PhaseBadge>
+                  ) : "\u2014"}
+                </dd>
               </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{formatDateTime(data?.updatedAt ?? null)}</dd>
+              <div className="sv-meta__row">
+                <dt>Template</dt>
+                <dd>{data?.templateName ?? "Unknown"}</dd>
               </div>
-              <div>
-                <dt>Last log</dt>
-                <dd>{formatDateTime(data?.lastLogAt ?? null)}</dd>
+              <div className="sv-meta__row">
+                <dt>Sandbox</dt>
+                <dd className="sv-meta__mono">{data?.sandboxId ?? "\u2014"}</dd>
               </div>
-              <div>
-                <dt>Current task</dt>
-                <dd>{data?.currentTaskId ?? "No active task"}</dd>
+              <div className="sv-meta__row">
+                <dt>Created</dt>
+                <dd>{data?.createdAt ? timeAgo(data.createdAt) : "\u2014"}</dd>
               </div>
-              <div>
-                <dt>Task count</dt>
-                <dd>{data ? String(data.tasks.length) : "0"}</dd>
+              <div className="sv-meta__row">
+                <dt>Duration</dt>
+                <dd className="sv-meta__mono">{formatDuration(data?.createdAt ?? null)}</dd>
               </div>
-              <div>
-                <dt>Environment</dt>
-                <dd>{formatEnvKeys(data?.envKeys)}</dd>
+              <div className="sv-meta__row">
+                <dt>Last activity</dt>
+                <dd>{data?.lastLogAt ? timeAgo(data.lastLogAt) : "\u2014"}</dd>
               </div>
+              {data && data.envKeys.length > 0 && (
+                <div className="sv-meta__row sv-meta__row--wrap">
+                  <dt>Environment</dt>
+                  <dd>
+                    <div className="sv-env-tags">
+                      {data.envKeys.map((k) => (
+                        <span key={k} className="sv-env-tag">{k}</span>
+                      ))}
+                    </div>
+                  </dd>
+                </div>
+              )}
             </dl>
           </section>
 
-          <section className="panel">
-            <div className="panel__header">
-              <div>
-                <p className="page-kicker">Preview</p>
-                <h2 className="panel__title">Endpoints</h2>
-              </div>
-            </div>
-
-            {data && data.previewUrls.length > 0 ? (
-              <div className="preview-list">
-                {data.previewUrls.map((preview) => (
+          {/* Preview links */}
+          {data && data.previewUrls.length > 0 && (
+            <section className="sv-aside__section">
+              <h3 className="sv-aside__heading">
+                Previews
+                {data.previewStatus === "ready" && (
+                  <span className="sv-aside__badge sv-aside__badge--live">Live</span>
+                )}
+                {data.previewStatus === "starting" && (
+                  <span className="sv-aside__badge">Starting</span>
+                )}
+              </h3>
+              <div className="sv-preview-list">
+                {data.previewUrls.map((p) => (
                   <a
-                    key={`${preview.port}-${preview.url}`}
-                    href={preview.url}
+                    key={`side-${p.port}-${p.url}`}
+                    href={p.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="preview-link"
+                    className="sv-preview-card"
                   >
-                    <span className="preview-link__label">Port {preview.port}</span>
-                    <span className="preview-link__value">{preview.url}</span>
+                    <div className="sv-preview-card__top">
+                      <span className="sv-preview-card__port">:{p.port}</span>
+                      <svg className="sv-preview-card__arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M6 2h8v8M14 2L6 10" />
+                      </svg>
+                    </div>
+                    <span className="sv-preview-card__url">
+                      {p.url.replace(/^https?:\/\//, "").slice(0, 42)}
+                    </span>
                   </a>
                 ))}
               </div>
-            ) : (
-              <div className="empty-state">
-                {data?.previewHint ?? "No preview is live yet."}
-              </div>
-            )}
-          </section>
+              {data.previewHint && (
+                <p className="sv-preview-hint">{data.previewHint}</p>
+              )}
+            </section>
+          )}
 
-          <section className="panel">
-            <div className="panel__header">
-              <div>
-                <p className="page-kicker">Latest task</p>
-                <h2 className="panel__title">Most recent instruction</h2>
+          {/* Task history */}
+          {data && data.tasks.length > 0 && (
+            <section className="sv-aside__section sv-aside__section--grow">
+              <h3 className="sv-aside__heading">
+                Tasks
+                <span className="sv-aside__count">{data.tasks.length}</span>
+              </h3>
+              <div className="sv-tasks">
+                {data.tasks.slice().reverse().map((task) => (
+                  <div
+                    key={task.taskId}
+                    className={`sv-task sv-task--${dotVariant(task.status)}`}
+                  >
+                    <div className="sv-task__header">
+                      <span className={`sv-dot sv-dot--sm sv-dot--${dotVariant(task.status)}`} />
+                      <span className="sv-task__prompt">{truncate(task.prompt, 80)}</span>
+                    </div>
+                    <div className="sv-task__meta">
+                      <span>{statusLabel(task.status)}</span>
+                      <span className="sv-task__sep">{"\u00B7"}</span>
+                      <span>{phaseLabels[task.phase]}</span>
+                      <span className="sv-task__sep">{"\u00B7"}</span>
+                      <span>{fmtTime(task.updatedAt)}</span>
+                    </div>
+                    {(task.error || task.result) && (
+                      <div className={`sv-task__result ${task.error ? "sv-task__result--err" : ""}`}>
+                        {truncate(task.error ?? task.result, 120)}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-            </div>
-
-            <div className="task-summary">
-              <div className="task-summary__prompt">
-                {truncate(focusTask?.prompt ?? data?.latestPrompt ?? null, 180)}
-              </div>
-              <div className="task-summary__meta">
-                {focusTask?.error ??
-                  focusTask?.result ??
-                  focusTask?.phaseDetail ??
-                  "Waiting for the next task update."}
-              </div>
-            </div>
-          </section>
+            </section>
+          )}
         </aside>
       </div>
-
-      <section className="panel">
-        <div className="panel__header panel__header--split">
-          <div>
-            <p className="page-kicker">History</p>
-            <h2 className="panel__title">Task history</h2>
-          </div>
-          <div className="panel-meta">Most recent tasks in this sandbox</div>
-        </div>
-
-        {data && data.tasks.length > 0 ? (
-          <div className="table-shell">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Prompt</th>
-                  <th>Status</th>
-                  <th>Updated</th>
-                  <th>Summary</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.tasks
-                  .slice()
-                  .reverse()
-                  .map((task) => (
-                    <tr key={task.taskId}>
-                      <td className="data-table__primary">
-                        <div className="table-primary">
-                          {truncate(task.prompt, 120)}
-                        </div>
-                        <div className="table-note">{phaseLabels[task.phase]}</div>
-                      </td>
-                      <td>
-                        <span
-                          className={`status-chip status-chip--${
-                            task.status === "complete"
-                              ? "complete"
-                              : task.status === "failed" || task.status === "stopped"
-                                ? "stopped"
-                                : "active"
-                          }`}
-                        >
-                          {statusLabel(task.status)}
-                        </span>
-                      </td>
-                      <td>{formatDateTime(task.updatedAt)}</td>
-                      <td className="data-table__summary">
-                        {truncate(
-                          task.error ?? task.result ?? task.phaseDetail ?? "—",
-                          160
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="empty-state">Waiting for the first recorded task.</div>
-        )}
-      </section>
     </div>
-  );
-}
-
-function Tag(props: { color: string; children: ReactNode }) {
-  return (
-    <span className="tag" style={badgeStyle(props.color)}>
-      {props.children}
-    </span>
   );
 }

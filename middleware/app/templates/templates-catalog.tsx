@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { TemplateCatalogEntry } from "@/lib/template-service-types";
 import type { RuntimeName } from "@/lib/types";
 import { summarizeTemplateRuntimes } from "@/lib/templates";
+import { readError } from "@/lib/fetch-utils";
 
 type CreateSandboxResponse = {
   sandboxUrl?: string | null;
@@ -16,6 +17,8 @@ type EnvironmentRow = {
   key: string;
   value: string;
 };
+
+type SchemaEnvironmentValues = Record<string, string>;
 
 function parseSandboxPath(
   sandboxUrl: string | null | undefined
@@ -29,11 +32,6 @@ function parseSandboxPath(
   } catch {
     return sandboxUrl;
   }
-}
-
-async function readError(response: Response): Promise<string> {
-  const body = (await response.json().catch(() => ({}))) as { error?: string };
-  return body.error ?? `HTTP ${response.status}`;
 }
 
 function runtimeLabel(runtime: RuntimeName): string {
@@ -51,18 +49,19 @@ function makeRowId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function buildDefaultEnvironmentRows(
+function buildDefaultSchemaEnvironmentValues(
   template: TemplateCatalogEntry | null
-): EnvironmentRow[] {
+): SchemaEnvironmentValues {
   if (!template || template.environmentSchema.length === 0) {
-    return [];
+    return {};
   }
 
-  return template.environmentSchema.map((field) => ({
-    id: makeRowId(),
-    key: field.key,
-    value: field.defaultValue ?? "",
-  }));
+  return Object.fromEntries(
+    template.environmentSchema.map((field) => [
+      field.key,
+      field.defaultValue ?? "",
+    ])
+  );
 }
 
 function isLaunchableTemplate(template: TemplateCatalogEntry): boolean {
@@ -89,11 +88,17 @@ export default function TemplatesCatalog({
   const [runtime, setRuntime] = useState<RuntimeName>(
     liveTemplates[0]?.defaultRuntime ?? "node24"
   );
-  const [environmentRows, setEnvironmentRows] = useState<EnvironmentRow[]>(
-    buildDefaultEnvironmentRows(liveTemplates[0] ?? null)
+  const [schemaEnvironmentValues, setSchemaEnvironmentValues] =
+    useState<SchemaEnvironmentValues>(
+      buildDefaultSchemaEnvironmentValues(liveTemplates[0] ?? null)
+    );
+  const [customEnvironmentRows, setCustomEnvironmentRows] = useState<EnvironmentRow[]>(
+    []
   );
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const isBusy = isCreating || isPending;
 
   const selectedTemplate = useMemo(
     () =>
@@ -112,21 +117,33 @@ export default function TemplatesCatalog({
   }, [runtime, selectedTemplate]);
 
   useEffect(() => {
-    setEnvironmentRows(buildDefaultEnvironmentRows(selectedTemplate));
+    setSchemaEnvironmentValues(
+      buildDefaultSchemaEnvironmentValues(selectedTemplate)
+    );
+    setCustomEnvironmentRows([]);
   }, [selectedTemplate?.slug]);
 
   async function handleCreate() {
+    if (isBusy) {
+      return;
+    }
+
     const nextPrompt = prompt.trim();
     if (!selectedTemplate || !isLaunchableTemplate(selectedTemplate)) {
       setFeedback("Choose a published template before creating a sandbox.");
       return;
     }
 
-    if (!nextPrompt && !selectedTemplate.defaultPrompt) {
+    if (
+      selectedTemplate.acceptsPrompts &&
+      !nextPrompt &&
+      !selectedTemplate.defaultPrompt
+    ) {
       setFeedback("Add an initial prompt before creating a sandbox.");
       return;
     }
 
+    setIsCreating(true);
     setFeedback(null);
 
     try {
@@ -134,13 +151,19 @@ export default function TemplatesCatalog({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: nextPrompt,
+          ...(selectedTemplate.acceptsPrompts ? { prompt: nextPrompt } : {}),
           runtime,
           templateSlug: selectedTemplate.slug,
-          environment: environmentRows.map((row) => ({
-            key: row.key,
-            value: row.value,
-          })),
+          environment: [
+            ...selectedTemplate.environmentSchema.map((field) => ({
+              key: field.key,
+              value: schemaEnvironmentValues[field.key] ?? "",
+            })),
+            ...customEnvironmentRows.map((row) => ({
+              key: row.key,
+              value: row.value,
+            })),
+          ],
         }),
       });
 
@@ -162,6 +185,7 @@ export default function TemplatesCatalog({
       setFeedback(
         error instanceof Error ? error.message : "Failed to create sandbox."
       );
+      setIsCreating(false);
     }
   }
 
@@ -170,20 +194,29 @@ export default function TemplatesCatalog({
     field: "key" | "value",
     value: string
   ) {
-    setEnvironmentRows((current) =>
+    setCustomEnvironmentRows((current) =>
       current.map((row) => (row.id === id ? { ...row, [field]: value } : row))
     );
   }
 
   function removeEnvironmentRow(id: string) {
-    setEnvironmentRows((current) => current.filter((row) => row.id !== id));
+    setCustomEnvironmentRows((current) =>
+      current.filter((row) => row.id !== id)
+    );
   }
 
-  function addEnvironmentRow(prefill?: string) {
-    setEnvironmentRows((current) => [
+  function addEnvironmentRow() {
+    setCustomEnvironmentRows((current) => [
       ...current,
-      { id: makeRowId(), key: prefill ?? "", value: "" },
+      { id: makeRowId(), key: "", value: "" },
     ]);
+  }
+
+  function updateSchemaEnvironmentValue(key: string, value: string) {
+    setSchemaEnvironmentValues((current) => ({
+      ...current,
+      [key]: value,
+    }));
   }
 
   return (
@@ -245,6 +278,7 @@ export default function TemplatesCatalog({
                             setSelectedTemplateSlug(template.slug);
                             setFeedback(null);
                           }}
+                          disabled={isBusy}
                         >
                           {isSelected ? "Selected" : template.launchLabel}
                         </button>
@@ -285,16 +319,22 @@ export default function TemplatesCatalog({
 
         {selectedTemplate ? (
           <div className="create-sandbox-panel">
-            <label className="form-field">
-              <span className="form-label">Initial prompt</span>
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder={selectedTemplate.promptPlaceholder}
-                rows={5}
-                disabled={isPending}
-              />
-            </label>
+            {selectedTemplate.acceptsPrompts ? (
+              <label className="form-field">
+                <span className="form-label">Initial prompt</span>
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder={selectedTemplate.promptPlaceholder}
+                  rows={5}
+                  disabled={isBusy}
+                />
+              </label>
+            ) : (
+              <p className="table-note">
+                This template runs a fixed shell command and does not accept prompts.
+              </p>
+            )}
 
             <div className="template-env-panel">
               <div className="panel__header panel__header--split">
@@ -306,9 +346,9 @@ export default function TemplatesCatalog({
                   type="button"
                   className="button button--ghost button--small"
                   onClick={() => addEnvironmentRow()}
-                  disabled={isPending}
+                  disabled={isBusy}
                 >
-                  Add variable
+                  Add custom variable
                 </button>
               </div>
 
@@ -318,41 +358,56 @@ export default function TemplatesCatalog({
               </p>
 
               {selectedTemplate.environmentSchema.length > 0 ? (
-                <div className="template-env-hints">
+                <div className="env-row-list">
                   {selectedTemplate.environmentSchema.map((field) => (
-                    <button
-                      key={field.key}
-                      type="button"
-                      className="button button--ghost button--tiny"
-                      onClick={() => {
-                        if (
-                          environmentRows.some(
-                            (row) => row.key.trim().toUpperCase() === field.key
-                          )
-                        ) {
-                          return;
-                        }
-                        addEnvironmentRow(field.key);
-                      }}
-                      disabled={isPending}
-                    >
-                      {field.key}
-                    </button>
+                    <div key={field.key} className="env-row">
+                      <label className="form-field form-field--compact">
+                        <span className="form-label">{field.label}</span>
+                        {field.inputType === "select" ? (
+                          <select
+                            value={schemaEnvironmentValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateSchemaEnvironmentValue(
+                                field.key,
+                                event.target.value
+                              )
+                            }
+                            disabled={isBusy}
+                          >
+                            {field.options.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            value={schemaEnvironmentValues[field.key] ?? ""}
+                            onChange={(event) =>
+                              updateSchemaEnvironmentValue(
+                                field.key,
+                                event.target.value
+                              )
+                            }
+                            placeholder={field.defaultValue ?? field.key}
+                            type={field.secret ? "password" : "text"}
+                            disabled={isBusy}
+                          />
+                        )}
+                        <span className="table-note">
+                          <strong>{field.key}</strong>
+                          {": "}
+                          {field.description}
+                        </span>
+                      </label>
+                    </div>
                   ))}
                 </div>
               ) : null}
 
-              {selectedTemplate.environmentSchema.length > 0 ? (
-                <div className="table-note">
-                  {selectedTemplate.environmentSchema
-                    .map((field) => `${field.key}: ${field.description}`)
-                    .join(" ")}
-                </div>
-              ) : null}
-
-              {environmentRows.length > 0 ? (
+              {customEnvironmentRows.length > 0 ? (
                 <div className="env-row-list">
-                  {environmentRows.map((row) => (
+                  {customEnvironmentRows.map((row) => (
                     <div key={row.id} className="env-row">
                       <label className="form-field form-field--compact">
                         <span className="form-label">Key</span>
@@ -362,7 +417,7 @@ export default function TemplatesCatalog({
                             updateEnvironmentRow(row.id, "key", event.target.value)
                           }
                           placeholder="EXAMPLE_API_KEY"
-                          disabled={isPending}
+                          disabled={isBusy}
                         />
                       </label>
                       <label className="form-field form-field--compact">
@@ -374,7 +429,7 @@ export default function TemplatesCatalog({
                           }
                           placeholder="Secret value"
                           type="password"
-                          disabled={isPending}
+                          disabled={isBusy}
                         />
                       </label>
                       <div className="env-row__actions">
@@ -382,7 +437,7 @@ export default function TemplatesCatalog({
                           type="button"
                           className="button button--ghost button--small"
                           onClick={() => removeEnvironmentRow(row.id)}
-                          disabled={isPending}
+                          disabled={isBusy}
                         >
                           Remove
                         </button>
@@ -390,11 +445,11 @@ export default function TemplatesCatalog({
                     </div>
                   ))}
                 </div>
-              ) : (
+              ) : selectedTemplate.environmentSchema.length === 0 ? (
                 <div className="empty-state">
                   No launch-time environment variables configured.
                 </div>
-              )}
+              ) : null}
             </div>
 
             <div className="create-sandbox-panel__footer">
@@ -405,7 +460,7 @@ export default function TemplatesCatalog({
                   onChange={(event) =>
                     setRuntime(event.target.value as RuntimeName)
                   }
-                  disabled={isPending}
+                  disabled={isBusy}
                 >
                   {selectedTemplate.supportedRuntimes.map((option) => (
                     <option key={option} value={option}>
@@ -420,13 +475,21 @@ export default function TemplatesCatalog({
                   type="button"
                   className="button button--primary button--small"
                   onClick={() => void handleCreate()}
-                  disabled={isPending}
+                  disabled={isBusy}
+                  aria-busy={isBusy}
                 >
-                  {isPending
-                    ? "Creating..."
-                    : selectedTemplate.defaultPrompt && !prompt.trim()
-                      ? "Create and run template flow"
-                      : "Create and open sandbox"}
+                  {isBusy ? (
+                    <>
+                      <span className="button__spinner" aria-hidden="true" />
+                      Creating sandbox...
+                    </>
+                  ) : selectedTemplate.acceptsPrompts &&
+                    selectedTemplate.defaultPrompt &&
+                    !prompt.trim() ? (
+                    "Create and run template flow"
+                  ) : (
+                    "Create and open sandbox"
+                  )}
                 </button>
               </div>
             </div>

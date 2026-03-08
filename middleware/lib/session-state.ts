@@ -5,6 +5,10 @@ import {
   readAgentLogs,
   readAgentResult,
 } from "./agent-runner";
+import {
+  logSessionDiagnostic,
+  summarizeSessionStateForDiagnostics,
+} from "./session-diagnostics";
 import { encodeSessionToken } from "./tokens";
 import type {
   PreviewStatus,
@@ -46,6 +50,20 @@ function createEmptySessionState(session: SessionToken): SessionState {
     stoppedAt: null,
     tasks: [],
   };
+}
+
+function normalizePortList(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (port): port is number =>
+      typeof port === "number" &&
+      Number.isFinite(port) &&
+      Number.isInteger(port) &&
+      port > 0
+  );
 }
 
 function inferPhaseFromStatus(status: TaskStatus): TaskPhase {
@@ -108,6 +126,7 @@ export async function readSessionState(
     const parsed = JSON.parse(buffer.toString("utf-8")) as SessionState;
     return {
       ...parsed,
+      ports: normalizePortList(parsed.ports),
       tasks: Array.isArray(parsed.tasks)
         ? parsed.tasks.map((task) => normalizeTaskRecord(task))
         : [],
@@ -539,6 +558,27 @@ export async function reconcileSessionState(
           : "complete";
       } else if (commandState?.exitCode != null) {
         nextStatus = "failed";
+      } else if (commandState === null) {
+        // Command not found — the runner process has vanished without
+        // producing a result file. Mark the task as failed so it doesn't
+        // block new prompts forever.
+        logSessionDiagnostic({
+          event: "runner_command_missing",
+          level: "warn",
+          data: {
+            sandboxId: session.sandboxId,
+            sessionKey: session.sessionKey,
+            taskId: task.taskId,
+            taskFileId: task.taskFileId,
+            cmdId: task.cmdId,
+            taskStatus: task.status,
+            taskPhase: task.phase,
+            telemetryPhase: telemetry.phase,
+            lastLogAt: telemetry.lastLogAt,
+            updatedAt: telemetry.lastProgressAt,
+          },
+        });
+        nextStatus = "failed";
       } else if (telemetry.lastLogAt != null || task.status === "running") {
         nextStatus = "running";
       }
@@ -577,6 +617,22 @@ export async function reconcileSessionState(
           telemetry.lastLogAt ?? 0
         );
         const errorMessage = buildUnexpectedRunnerExitMessage(commandState);
+        logSessionDiagnostic({
+          event: "runner_exit_without_result",
+          level: "warn",
+          data: {
+            sandboxId: session.sandboxId,
+            sessionKey: session.sessionKey,
+            taskId: task.taskId,
+            taskFileId: task.taskFileId,
+            cmdId: task.cmdId,
+            exitCode: commandState.exitCode,
+            hasStdout: Boolean(commandState.stdout),
+            hasStderr: Boolean(commandState.stderr),
+            lastLogAt: telemetry.lastLogAt,
+            updatedAt: telemetry.lastProgressAt,
+          },
+        });
         nextTask = {
           ...nextTask,
           status: "failed",
@@ -586,6 +642,22 @@ export async function reconcileSessionState(
           completedAt,
           result: null,
           error: errorMessage,
+        };
+      } else if (commandState === null && nextStatus === "failed") {
+        const completedAt = Math.max(
+          Date.now(),
+          telemetry.lastProgressAt,
+          telemetry.lastLogAt ?? 0
+        );
+        nextTask = {
+          ...nextTask,
+          status: "failed",
+          phase: "failed",
+          phaseDetail: "Agent runner process disappeared without producing a result.",
+          updatedAt: completedAt,
+          completedAt,
+          result: null,
+          error: "Agent runner process disappeared without producing a result.",
         };
       }
 
@@ -617,6 +689,17 @@ export async function reconcileSessionState(
 
   if (changed || nextAgentSessionId !== previousAgentSessionId) {
     await writeSessionState(sandbox, state);
+  }
+
+  if (state.tasks.length === 0 || state.stoppedAt != null) {
+    logSessionDiagnostic({
+      event: "session_state_reconciled_terminal",
+      data: {
+        sandboxId: session.sandboxId,
+        sessionKey: session.sessionKey,
+        summary: summarizeSessionStateForDiagnostics(state),
+      },
+    });
   }
 
   return pruneSessionArtifacts(sandbox, state);
@@ -930,7 +1013,7 @@ export async function buildPreviewUrls(
 ): Promise<SessionViewPreview[]> {
   const previews: SessionViewPreview[] = [];
 
-  for (const port of ports) {
+  for (const port of normalizePortList(ports)) {
     try {
       previews.push({
         port,
@@ -1116,6 +1199,7 @@ export async function buildSessionView(
     sandboxUrl: buildSandboxUrl(req, session.viewToken),
     templateSlug: null,
     templateName: null,
+    executionStrategyKind: null,
     envKeys: [],
     status,
     phase,

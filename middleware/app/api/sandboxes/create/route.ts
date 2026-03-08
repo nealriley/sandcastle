@@ -3,6 +3,10 @@ import { getWebsiteUser } from "@/auth";
 import { tokenConfigurationErrorResponse } from "@/lib/auth";
 import { createOwnedSandboxTask, MAX_PROMPT_LENGTH, VALID_RUNTIMES } from "@/lib/create-owned-sandbox";
 import {
+  executionStrategyAcceptsPrompts,
+  findMissingExecutionStrategyEnvironmentKeys,
+} from "@/lib/execution-strategy";
+import {
   resolveTemplatePrompt,
   resolveTemplateEnvironment,
 } from "@/lib/templates";
@@ -59,14 +63,15 @@ export async function POST(req: NextRequest) {
     environment = [],
   } = body;
 
-  if (typeof prompt !== "string") {
+  if (prompt != null && typeof prompt !== "string") {
     return Response.json(
       { error: "Missing or invalid 'prompt' field" },
       { status: 400 }
     );
   }
+  const promptText = typeof prompt === "string" ? prompt : "";
 
-  if (prompt.length > MAX_PROMPT_LENGTH) {
+  if (promptText.length > MAX_PROMPT_LENGTH) {
     return Response.json(
       { error: `Prompt exceeds maximum length of ${MAX_PROMPT_LENGTH} characters` },
       { status: 413 }
@@ -108,6 +113,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  if (
+    executionStrategyAcceptsPrompts(template.executionStrategy) &&
+    !promptText.trim() &&
+    !template.defaultPrompt
+  ) {
+    return Response.json(
+      { error: "Missing or invalid 'prompt' field" },
+      { status: 400 }
+    );
+  }
+
   let normalizedEnvironment;
   try {
     normalizedEnvironment = normalizeSandboxEnvironment(environment);
@@ -131,9 +147,22 @@ export async function POST(req: NextRequest) {
     }
   );
   const resolvedEnvKeys = Object.keys(resolvedEnvironment).sort();
+  const missingStrategyEnvKeys = findMissingExecutionStrategyEnvironmentKeys(
+    template.executionStrategy,
+    resolvedEnvironment
+  );
+
+  if (missingStrategyEnvKeys.length > 0) {
+    return Response.json(
+      {
+        error: `${template.name} requires ${missingStrategyEnvKeys.join(", ")} before launch.`,
+      },
+      { status: 400 }
+    );
+  }
 
   try {
-    resolveTemplatePrompt(template, prompt, resolvedEnvironment);
+    resolveTemplatePrompt(template, promptText, resolvedEnvironment);
   } catch (error) {
     return Response.json(
       {
@@ -143,13 +172,6 @@ export async function POST(req: NextRequest) {
             : "Invalid template prompt configuration.",
       },
       { status: 400 }
-    );
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json(
-      { error: "ANTHROPIC_API_KEY is not configured" },
-      { status: 500 }
     );
   }
 
@@ -175,7 +197,7 @@ export async function POST(req: NextRequest) {
   try {
     await enforceSessionCreateLimits(user.id);
     const response = await createOwnedSandboxTask(req, {
-      prompt,
+      prompt: promptText,
       runtime: requestedRuntime,
       template,
       environment: resolvedEnvironment,

@@ -230,6 +230,22 @@ test("ListSandboxes returns structured auth-required results without shared auth
   assert.deepEqual(result.sandboxes, []);
 });
 
+test("ListTemplates defaults to claude-code when the response omits a default slug", async () => {
+  const requests = [];
+  const listTemplates = getFormula("ListTemplates");
+  const context = makeContext(async (request) => {
+    requests.push(request);
+    return { body: {} };
+  });
+
+  const result = await listTemplates.execute([], context);
+
+  assert.equal(new URL(requests[0].url).pathname, "/api/templates");
+  assert.equal(requests[0].disableAuthentication, true);
+  assert.equal(result.defaultTemplateSlug, "claude-code");
+  assert.deepEqual(result.templates, []);
+});
+
 test("ResumeSandbox posts sandbox id + prompt without shared auth and quick-checks the task", async () => {
   Atomics.wait = () => "ok";
   const requests = [];

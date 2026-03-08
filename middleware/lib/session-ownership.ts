@@ -4,6 +4,7 @@ import type {
   SessionToken,
   TaskStatus,
 } from "./types.js";
+import type { ExecutionStrategy } from "./template-service-types";
 import { getRedis } from "./redis";
 
 type SessionOwnershipRedis = {
@@ -44,6 +45,7 @@ export async function touchOwnedSession(args: {
   status: OwnedSandboxStatus;
   templateSlug?: string | null;
   templateName?: string | null;
+  executionStrategyKind?: ExecutionStrategy["kind"];
   envKeys?: string[];
 }): Promise<SessionOwnershipRecord> {
   return touchOwnedSessionInRedis(getRedis(), args);
@@ -58,6 +60,7 @@ export async function touchOwnedSessionInRedis(
     status: OwnedSandboxStatus;
     templateSlug?: string | null;
     templateName?: string | null;
+    executionStrategyKind?: ExecutionStrategy["kind"];
     envKeys?: string[];
   }
 ): Promise<SessionOwnershipRecord> {
@@ -72,6 +75,10 @@ export async function touchOwnedSessionInRedis(
     sandboxId: args.session.sandboxId,
     templateSlug: args.templateSlug ?? existing?.templateSlug ?? null,
     templateName: args.templateName ?? existing?.templateName ?? null,
+    executionStrategyKind:
+      args.executionStrategyKind ??
+      existing?.executionStrategyKind ??
+      "claude-agent",
     envKeys: args.envKeys ?? existing?.envKeys ?? [],
     runtime: args.session.runtime,
     ports: args.session.ports,

@@ -1,3 +1,5 @@
+import type { ExecutionStrategy } from "./template-service-types.js";
+
 export type RuntimeName = "node24" | "node22" | "python3.13";
 
 export type TaskStatus =
@@ -229,6 +231,7 @@ export interface SessionViewResponse {
   sandboxUrl: string;
   templateSlug: string | null;
   templateName: string | null;
+  executionStrategyKind: ExecutionStrategy["kind"] | null;
   envKeys: string[];
   status: TaskStatus;
   phase: TaskPhase;
@@ -259,6 +262,7 @@ export interface SessionOwnershipRecord {
   sandboxId: string;
   templateSlug?: string | null;
   templateName?: string | null;
+  executionStrategyKind?: ExecutionStrategy["kind"];
   envKeys?: string[];
   runtime: RuntimeName;
   ports: number[];
@@ -300,4 +304,12 @@ export interface PairingCodeRecord {
 export interface PairingUserRecord {
   code: string;
   expiresAt: number;
+}
+
+export interface UserEnvironmentVariable {
+  key: string;
+  value: string;
+  secret: boolean;
+  createdAt: number;
+  updatedAt: number;
 }

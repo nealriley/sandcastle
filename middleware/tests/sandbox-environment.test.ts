@@ -22,14 +22,29 @@ test("normalizeSandboxEnvironment accepts valid uppercase keys and sorts them", 
   });
 });
 
-test("normalizeSandboxEnvironment rejects reserved Sandcastle keys", () => {
+test("normalizeSandboxEnvironment rejects reserved Sandcastle keys but allows provider overrides", () => {
   assert.throws(
     () =>
       normalizeSandboxEnvironment([
-        { key: "ANTHROPIC_API_KEY", value: "secret" },
+        { key: "AUTH_SECRET", value: "secret" },
       ]),
     /reserved by Sandcastle/
   );
+
+  const allowed = normalizeSandboxEnvironment([
+    { key: "ANTHROPIC_API_KEY", value: "anthropic-secret" },
+    { key: "ANTHROPIC_MODEL", value: "claude-sonnet-4-5" },
+    { key: "OPENAI_API_KEY", value: "openai-secret" },
+  ]);
+
+  assert.deepEqual(allowed, {
+    env: {
+      ANTHROPIC_API_KEY: "anthropic-secret",
+      ANTHROPIC_MODEL: "claude-sonnet-4-5",
+      OPENAI_API_KEY: "openai-secret",
+    },
+    envKeys: ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "OPENAI_API_KEY"],
+  });
 });
 
 test("normalizeSandboxEnvironment ignores empty rows and rejects duplicates", () => {

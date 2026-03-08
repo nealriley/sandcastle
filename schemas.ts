@@ -33,7 +33,7 @@ export const SandboxSummarySchema = coda.makeObjectSchema({
     templateSlug: {
       type: coda.ValueType.String,
       description:
-        "Template slug used to create this sandbox, such as standard, claude-code, codex, shell-scripts-validation, or webpage-inspector.",
+        "Template slug used to create this sandbox, such as claude-code, codex, website-deep-dive, or wordcount.",
     },
     templateName: {
       type: coda.ValueType.String,
@@ -154,7 +154,7 @@ export const TemplateListResultSchema = coda.makeObjectSchema({
     },
     defaultTemplateSlug: {
       type: coda.ValueType.String,
-      description: "Default template slug for standard new sandboxes.",
+      description: "Default template slug for new Sandcastle sandboxes.",
     },
     authUrl: {
       type: coda.ValueType.String,

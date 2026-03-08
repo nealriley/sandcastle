@@ -6,15 +6,21 @@ import {
   listSandcastleTemplateCatalog,
   type SandcastleTemplateDefinition,
 } from "./templates";
+import {
+  cloneExecutionStrategy,
+  executionStrategyAcceptsPrompts,
+} from "./execution-strategy";
 import { getRedis } from "./redis";
 import type { TemplateSummary } from "./types.js";
 import type {
   DeclarativeTemplateSpec,
+  ExecutionStrategy,
   LegacyBuiltinTemplateSpec,
   TemplateBootstrapManifest,
   TemplateBootstrapOperation,
   TemplateCatalogEntry,
   TemplateEnvironmentField,
+  TemplateEnvironmentFieldOption,
   TemplateLaunchConfig,
   TemplatePromptConfig,
   TemplateRecord,
@@ -71,6 +77,7 @@ type UpdateTemplateVersionArgs = {
 const MAX_USER_TEMPLATES = 50;
 const MAX_TEMPLATE_VERSIONS = 20;
 const MAX_ENV_FIELDS = 16;
+const MAX_ENV_FIELD_OPTIONS = 16;
 const MAX_BOOTSTRAP_OPERATIONS = 64;
 const MAX_FILE_CONTENT_LENGTH = 100_000;
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -231,6 +238,97 @@ function normalizeSourceConfig(input: unknown): TemplateSourceConfig {
   );
 }
 
+function normalizeExecutionStrategy(input: unknown): ExecutionStrategy {
+  if (input == null) {
+    return { kind: "claude-agent" };
+  }
+
+  if (!input || typeof input !== "object") {
+    throw new TemplateServiceError(
+      400,
+      "executionStrategy must be an object."
+    );
+  }
+
+  const kind = (input as { kind?: unknown }).kind;
+  if (kind === "claude-agent" || kind === "codex-agent") {
+    return { kind };
+  }
+
+  if (kind === "shell-command") {
+    const cmd = requireString(
+      (input as { cmd?: unknown }).cmd,
+      "executionStrategy.cmd",
+      240
+    );
+    const rawArgs = (input as { args?: unknown }).args ?? [];
+    if (!Array.isArray(rawArgs)) {
+      throw new TemplateServiceError(
+        400,
+        "executionStrategy.args must be an array of strings."
+      );
+    }
+
+    const args = rawArgs.map((value, index) => {
+      if (typeof value !== "string") {
+        throw new TemplateServiceError(
+          400,
+          `executionStrategy.args[${index}] must be a string.`
+        );
+      }
+      return value;
+    });
+
+    const cwd = optionalString(
+      (input as { cwd?: unknown }).cwd,
+      "executionStrategy.cwd",
+      240
+    );
+    const promptModeRaw =
+      (input as { promptMode?: unknown }).promptMode ?? "none";
+    if (promptModeRaw !== "none" && promptModeRaw !== "env") {
+      throw new TemplateServiceError(
+        400,
+        "executionStrategy.promptMode must be one of: none, env."
+      );
+    }
+    const promptEnvKey = optionalString(
+      (input as { promptEnvKey?: unknown }).promptEnvKey,
+      "executionStrategy.promptEnvKey",
+      64
+    )?.toUpperCase() ?? null;
+    if (
+      promptModeRaw === "env" &&
+      (!promptEnvKey || !/^[A-Z][A-Z0-9_]*$/.test(promptEnvKey))
+    ) {
+      throw new TemplateServiceError(
+        400,
+        "executionStrategy.promptEnvKey must be uppercase snake case when promptMode is 'env'."
+      );
+    }
+    if (promptModeRaw === "none" && promptEnvKey) {
+      throw new TemplateServiceError(
+        400,
+        "executionStrategy.promptEnvKey may be set only when promptMode is 'env'."
+      );
+    }
+
+    return {
+      kind,
+      cmd,
+      args,
+      cwd,
+      promptMode: promptModeRaw,
+      promptEnvKey,
+    };
+  }
+
+  throw new TemplateServiceError(
+    400,
+    "executionStrategy.kind must be one of: claude-agent, codex-agent, shell-command."
+  );
+}
+
 function normalizeRuntimeConstraints(
   input: unknown
 ): TemplateRuntimeConstraints {
@@ -335,6 +433,68 @@ function normalizeLaunchConfig(input: unknown): TemplateLaunchConfig {
   };
 }
 
+function normalizeEnvironmentFieldOptions(
+  input: unknown,
+  fieldPath: string
+): TemplateEnvironmentFieldOption[] {
+  if (input == null) {
+    return [];
+  }
+
+  if (!Array.isArray(input)) {
+    throw new TemplateServiceError(
+      400,
+      `${fieldPath}.options must be an array.`
+    );
+  }
+
+  if (input.length > MAX_ENV_FIELD_OPTIONS) {
+    throw new TemplateServiceError(
+      400,
+      `${fieldPath}.options may contain at most ${MAX_ENV_FIELD_OPTIONS} options.`
+    );
+  }
+
+  const seen = new Set<string>();
+
+  return input.map((raw, index) => {
+    if (!raw || typeof raw !== "object") {
+      throw new TemplateServiceError(
+        400,
+        `${fieldPath}.options[${index}] must be an object.`
+      );
+    }
+
+    const value = requireString(
+      (raw as { value?: unknown }).value,
+      `${fieldPath}.options[${index}].value`,
+      200
+    );
+
+    if (seen.has(value)) {
+      throw new TemplateServiceError(
+        400,
+        `${fieldPath}.options contains duplicate value '${value}'.`
+      );
+    }
+    seen.add(value);
+
+    return {
+      value,
+      label: requireString(
+        (raw as { label?: unknown }).label ?? value,
+        `${fieldPath}.options[${index}].label`,
+        120
+      ),
+      description: optionalString(
+        (raw as { description?: unknown }).description,
+        `${fieldPath}.options[${index}].description`,
+        240
+      ),
+    };
+  });
+}
+
 function normalizeEnvironmentSchema(input: unknown): TemplateEnvironmentField[] {
   if (input == null) {
     return [];
@@ -384,6 +544,63 @@ function normalizeEnvironmentSchema(input: unknown): TemplateEnvironmentField[] 
     }
     seen.add(key);
 
+    const inputType =
+      (raw as { inputType?: unknown }).inputType == null
+        ? "text"
+        : (raw as { inputType?: unknown }).inputType;
+    if (inputType !== "text" && inputType !== "select") {
+      throw new TemplateServiceError(
+        400,
+        `environmentSchema[${index}].inputType must be one of: text, select.`
+      );
+    }
+
+    const options = normalizeEnvironmentFieldOptions(
+      (raw as { options?: unknown }).options,
+      `environmentSchema[${index}]`
+    );
+    const secret =
+      typeof (raw as { secret?: unknown }).secret === "boolean"
+        ? Boolean((raw as { secret?: unknown }).secret)
+        : inferSecretField(key);
+    const defaultValue = optionalString(
+      (raw as { defaultValue?: unknown }).defaultValue,
+      `environmentSchema[${index}].defaultValue`,
+      4000
+    );
+
+    if (inputType === "select" && secret) {
+      throw new TemplateServiceError(
+        400,
+        `environmentSchema[${index}] cannot be both secret and select-based.`
+      );
+    }
+
+    if (inputType === "select" && options.length === 0) {
+      throw new TemplateServiceError(
+        400,
+        `environmentSchema[${index}].options must contain at least one option for select fields.`
+      );
+    }
+
+    if (inputType !== "select" && options.length > 0) {
+      throw new TemplateServiceError(
+        400,
+        `environmentSchema[${index}].options may be set only when inputType is 'select'.`
+      );
+    }
+
+    if (
+      inputType === "select" &&
+      defaultValue &&
+      !options.some((option) => option.value === defaultValue)
+    ) {
+      throw new TemplateServiceError(
+        400,
+        `environmentSchema[${index}].defaultValue must match one of the select options.`
+      );
+    }
+
     return {
       key,
       label: requireString(
@@ -397,15 +614,10 @@ function normalizeEnvironmentSchema(input: unknown): TemplateEnvironmentField[] 
         240
       ),
       required: Boolean((raw as { required?: unknown }).required),
-      secret:
-        typeof (raw as { secret?: unknown }).secret === "boolean"
-          ? Boolean((raw as { secret?: unknown }).secret)
-          : inferSecretField(key),
-      defaultValue: optionalString(
-        (raw as { defaultValue?: unknown }).defaultValue,
-        `environmentSchema[${index}].defaultValue`,
-        4000
-      ),
+      secret,
+      defaultValue,
+      inputType,
+      options,
     };
   });
 }
@@ -594,6 +806,7 @@ export function normalizeDeclarativeTemplateSpec(
     launchConfig: normalizeLaunchConfig(raw.launchConfig),
     environmentSchema: normalizeEnvironmentSchema(raw.environmentSchema),
     promptConfig: normalizePromptConfig(raw.promptConfig),
+    executionStrategy: normalizeExecutionStrategy(raw.executionStrategy),
     bootstrapManifest: normalizeBootstrapManifest(raw.bootstrapManifest),
     assetBundleRef: optionalString(
       raw.assetBundleRef,
@@ -638,6 +851,7 @@ function buildLegacyBuiltinSpec(
       defaultRuntime: template.defaultRuntime,
       supportedRuntimes: [...template.supportedRuntimes],
     },
+    executionStrategy: cloneExecutionStrategy(template.executionStrategy),
     launchConfig: {
       ports: [...template.ports],
       timeoutMs: template.timeoutMs,
@@ -647,9 +861,14 @@ function buildLegacyBuiltinSpec(
       key: hint.key,
       label: hint.label,
       description: hint.description,
-      required: false,
-      secret: inferSecretField(hint.key),
-      defaultValue: null,
+      required: hint.required ?? false,
+      secret:
+        typeof hint.secret === "boolean"
+          ? hint.secret
+          : inferSecretField(hint.key),
+      defaultValue: hint.defaultValue ?? null,
+      inputType: hint.inputType ?? "text",
+      options: hint.options?.map((option) => ({ ...option })) ?? [],
     })),
     promptConfig: {
       promptPlaceholder: template.promptPlaceholder,
@@ -723,10 +942,13 @@ function buildCatalogEntry(
     sourceKind: version.spec.source.kind,
     defaultRuntime: version.spec.runtimeConstraints.defaultRuntime,
     supportedRuntimes: version.spec.runtimeConstraints.supportedRuntimes,
+    executionStrategyKind: version.spec.executionStrategy.kind,
+    acceptsPrompts: executionStrategyAcceptsPrompts(version.spec.executionStrategy),
     promptPlaceholder: version.spec.promptConfig.promptPlaceholder,
     defaultPrompt: version.spec.promptConfig.defaultPrompt,
     environmentSchema: version.spec.environmentSchema.map((field) => ({
       ...field,
+      options: field.options.map((option) => ({ ...option })),
     })),
   };
 }
@@ -903,6 +1125,11 @@ function mapEnvironmentHints(
     key: field.key,
     label: field.label,
     description: field.description,
+    required: field.required,
+    secret: field.secret,
+    defaultValue: field.defaultValue,
+    inputType: field.inputType,
+    options: field.options.map((option) => ({ ...option })),
   }));
 }
 
@@ -1008,6 +1235,7 @@ function materializeLaunchTemplate(
     source: spec.source,
     defaultRuntime: spec.runtimeConstraints.defaultRuntime,
     supportedRuntimes: [...spec.runtimeConstraints.supportedRuntimes],
+    executionStrategy: cloneExecutionStrategy(spec.executionStrategy),
     launchLabel: template.launchLabel,
     ports: [...spec.launchConfig.ports],
     timeoutMs: spec.launchConfig.timeoutMs,

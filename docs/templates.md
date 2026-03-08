@@ -1,502 +1,164 @@
 # Sandcastle Templates
 
-This document explains how Sandcastle templates work in the live product.
+This document describes the current template system as implemented in the repo.
 
-## What A Template Is
+## Overview
 
-In Sandcastle, a template is an application-level definition exposed through
-the internal template service. The current built-in system templates still
-originate in `projects/ai-coding-agent/middleware/lib/templates.ts`, but the
-website and SHGO consume them through the template-service layer. It is not a
-Vercel-native "template" resource.
+Templates are application-level definitions exposed through the template-service
+layer. The built-in system templates currently originate in
+`projects/ai-coding-agent/middleware/lib/templates.ts`, while both the website
+and SHGO consume them through template-service APIs.
 
-Each template definition includes:
+Each launchable template defines:
 
-- `slug`, `name`, `summary`, `purpose`
-- `source`
-  - `runtime`
-  - or `snapshot` with a snapshot env var
-- `defaultRuntime`
-- `supportedRuntimes`
-- `ports`
-- `timeoutMs`
-- `vcpus`
-- `promptPlaceholder`
-- optional `defaultPrompt`
-- `envHints`
-- `bootstrap(sandbox, context)`
-- `buildInitialPrompt({ prompt, environment })`
+- identity: `slug`, `name`, `summary`, `purpose`, `status`
+- source model: `runtime` or `snapshot`
+- runtime limits: default runtime, supported runtimes, timeout, vCPUs, ports
+- execution strategy
+- prompt behavior: placeholder, default prompt, initial prompt builder
+- launch-time environment schema (`envHints`)
+- bootstrap behavior for files and setup inside the sandbox
 
-The core interface is defined in
-`projects/ai-coding-agent/middleware/lib/templates.ts`.
+## Execution Strategies
 
-## What Templates Actually Control
+Sandcastle currently supports three execution strategies:
 
-Templates currently control four things:
+| Strategy | Initial prompt | Follow-ups | Required provider env |
+| --- | --- | --- | --- |
+| `claude-agent` | Yes | Yes | `ANTHROPIC_API_KEY` |
+| `codex-agent` | Yes | Yes | `OPENAI_API_KEY` |
+| `shell-command` | Configurable | No | None by default |
 
-1. Sandbox launch configuration
-   - runtime or snapshot source
-   - preview ports
-   - timeout
-   - vCPU allocation
+Notes:
 
-2. Bootstrap assets written into the sandbox
-   - shell scripts
-   - helper Node modules
-   - placeholder files
-   - README / manifest files
+- `shell-command` templates can opt into an initial prompt by mapping the prompt
+  into an environment variable.
+- Shell-command templates never accept follow-up prompts.
+- The session viewer and launch UIs rely on execution-strategy metadata rather
+  than hardcoded template slugs.
 
-3. Optional background processes
-   - for example, the webpage-inspector template starts a detached HTTP server
+## Environment Schema and Select Fields
 
-4. The first prompt sent to Claude
-   - templates rewrite the first task prompt into a template-aware instruction block
+Template launch forms are schema-driven.
 
-Templates do not currently change Claude's allowed tool list. That is fixed in
-the runner.
+Current supported field behavior:
+
+- plain text inputs
+- secret inputs
+- default values
+- select lists with explicit options
+
+Current built-ins use this in production:
+
+- `claude-code`
+  - `ANTHROPIC_MODEL` select
+  - optional `ANTHROPIC_API_KEY` override
+- `codex`
+  - `OPENAI_MODEL` select
+  - optional `OPENAI_API_KEY` override
+- `website-deep-dive`
+  - `ANTHROPIC_MODEL` select
+  - optional `ANTHROPIC_API_KEY` override
+  - optional website auth env fields
+- `wordcount`
+  - prompt input for target file path
+  - `WORDCOUNT_METHOD` select
+
+## Provider Environment Rules
+
+Launch-time environment variables are validated before sandbox creation.
+
+Current behavior:
+
+- keys are normalized to uppercase
+- duplicates are rejected
+- reserved platform keys are blocked
+- provider override keys are explicitly allowlisted:
+  - `ANTHROPIC_API_KEY`
+  - `ANTHROPIC_MODEL`
+  - `OPENAI_API_KEY`
+  - `OPENAI_MODEL`
+
+Provider precedence:
+
+1. user-supplied provider key in launch-time env
+2. stored user env var from `/environment`
+3. platform default provider key from middleware env
+
+If the required provider key is still missing after resolution, launch fails
+with a `400` before sandbox creation.
 
 ## Launch Flow
 
-Both website sandbox creation and SHGO sandbox creation converge into the same
-shared creation path.
+Both creation paths converge into the same shared owned-sandbox flow:
+
+- website route: `POST /api/sandboxes/create`
+- SHGO route: `POST /api/sessions`
 
 High-level flow:
 
-1. The caller selects a `templateSlug`.
-2. Sandcastle validates the slug, requested runtime, prompt, and env inputs.
-3. Template-specific default environment values are injected if needed.
-4. Sandcastle creates the Vercel Sandbox.
-5. The template's `bootstrap(...)` function writes helper files into the sandbox.
-6. Sandcastle writes the launch environment bundle into the sandbox.
-7. The template builds the initial Claude prompt.
-8. The Claude runner starts with that prompt.
-
-Relevant files:
-
-- `projects/ai-coding-agent/middleware/app/api/sandboxes/create/route.ts`
-- `projects/ai-coding-agent/middleware/app/api/sessions/route.ts`
-- `projects/ai-coding-agent/middleware/lib/create-owned-sandbox.ts`
-
-## Source Model
-
-Every template declares a source:
-
-- `runtime`
-  Create a fresh sandbox with the selected runtime.
-
-- `snapshot`
-  Prefer a snapshot if the configured snapshot env var is present. Otherwise
-  fall back to a runtime-based create.
-
-This means snapshot-backed templates still work in environments where the
-snapshot id is missing; they just start from a slower fresh sandbox.
-
-## Bootstrap Mechanics
-
-Templates bootstrap by calling `sandbox.writeFiles(...)` and then optionally
-running setup commands.
-
-The pattern looks like:
-
-1. Build file contents in TypeScript.
-2. Write those files into `/vercel/sandbox/...`.
-3. `chmod +x` any shell scripts.
-4. Optionally start a detached process.
-
-This is how Sandcastle "installs" template helpers today. We are not publishing
-packages or running a separate template installer.
-
-## Environment Variables
-
-Website-created sandboxes can include launch-time environment variables.
-
-Validation rules:
-
-- keys are normalized to uppercase
-- max 16 variables
-- max 4000 characters per value
-- duplicates are rejected
-- reserved keys and prefixes are blocked
-
-Blocked examples include:
-
-- `AGENT_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `AUTH_*`
-- `REDIS_*`
-- `UPSTASH_*`
-- `VERCEL_*`
-
-Implementation lives in
-`projects/ai-coding-agent/middleware/lib/sandbox-environment.ts`.
-
-### How env vars reach the sandbox
-
-Sandcastle currently uses two mechanisms:
-
-1. pass `env` into `Sandbox.create(...)`
-2. also write a sandbox-local env bundle to:
-   `/vercel/sandbox/.sandcastle-env.json`
-
-The second mechanism exists because the currently installed SDK/runtime behavior
-has not been reliable enough on its own for persisted follow-up tasks.
-
-### How env vars reach Claude tasks
-
-On every task start, the runner script:
-
-1. reads `/vercel/sandbox/.sandcastle-env.json`
-2. loads each entry into `process.env`
-3. layers the Anthropic proxy vars on top
-
-That means follow-up tasks continue to see the same user-provided env values.
-
-Important security property:
-
-- raw env values are not stored in Redis ownership records
-- browser APIs only expose env key names
-- `ReadFile` blocks the env bundle file directly
-
-## Prompt Shaping
-
-There are two different prompt layers in the product.
-
-### 1. SHGO / Pack skill prompt
-
-The Pack prompt tells SHGO when to choose a template and how to route tool
-calls. Example: for webpage audit requests, it prefers `webpage-inspector`.
-
-This lives in `projects/ai-coding-agent/pack.ts`.
-
-### 2. Template-built first task prompt
-
-Inside the sandbox, Sandcastle does not currently send a separate hidden
-template system prompt to the Claude Agent SDK.
-
-Instead, it generates the first task prompt by calling:
-
-- `resolveTemplatePrompt(...)`
-- then `template.buildInitialPrompt(...)`
-
-So the template behavior is currently expressed as a template-specific first
-prompt string.
-
-### Follow-ups
-
-Template prompt shaping only happens on sandbox creation.
-
-After that, follow-up prompts are resumed into the same Claude session as raw
-user prompts. The template still influences follow-ups because:
-
-- the helper files remain in the sandbox
-- the same Claude session retains prior context
-- the launch environment is rehydrated for each task
-
-But Sandcastle does not re-wrap every follow-up prompt with the template
-instructions.
-
-## Claude Runner Defaults
-
-All templates share the same Claude runner options:
-
-- allowed tools: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`
-- `permissionMode: "acceptEdits"`
-- `includePartialMessages: true`
-- adaptive thinking enabled
-
-This is implemented in
-`projects/ai-coding-agent/middleware/lib/agent-runner.ts`.
+1. resolve the template slug through the template service
+2. validate runtime, prompt, and launch env
+3. resolve template defaults and provider fallbacks
+4. create the sandbox from snapshot or runtime
+5. bootstrap template files into the sandbox
+6. persist the sandbox-local env bundle
+7. build the initial prompt for prompt-capable strategies
+8. start the strategy-specific runner
 
 ## Built-In Templates
 
-### Provider Templates: `claude-code` and `codex`
+### `claude-code`
 
-Sandcastle now has two provider-oriented templates that share one bootstrap
-core:
+- execution strategy: `claude-agent`
+- purpose: general coding, debugging, refactors, and collaborative work
+- bootstrap: shared provider contract files under
+  `/vercel/sandbox/sandcastle-template`
+- launch controls: Anthropic model select and optional Anthropic key override
 
-- `claude-code`
-- `codex`
+### `codex`
 
-They both write the same canonical artifact set into:
+- execution strategy: `codex-agent`
+- purpose: OpenAI-backed coding work with stable request/result artifacts
+- bootstrap: same provider contract layout as `claude-code`
+- launch controls: OpenAI model select and optional OpenAI key override
 
-- `/vercel/sandbox/sandcastle-template/README.md`
-- `/vercel/sandbox/sandcastle-template/CONTRACT.md`
-- `/vercel/sandbox/sandcastle-template/env-keys.txt`
-- `/vercel/sandbox/sandcastle-template/request.example.json`
-- `/vercel/sandbox/sandcastle-template/result.example.json`
-- `/vercel/sandbox/sandcastle-template/request.json`
-- `/vercel/sandbox/sandcastle-template/result.json`
-- `/vercel/sandbox/sandcastle-template/result.md`
-- `/vercel/sandbox/sandcastle-template/template-contract.mjs`
-- `/vercel/sandbox/sandcastle-template/show-contract.sh`
+### `website-deep-dive`
 
-### Structured request block
+- execution strategy: `claude-agent`
+- purpose: website research, product understanding, and technical reconnaissance
+- bootstrap: same provider contract layout as `claude-code`
+- launch controls: Anthropic model select, optional Anthropic key override, and
+  optional website auth fields
 
-Advanced callers may embed a structured request block directly inside the user
-prompt:
+### `wordcount`
 
-````text
-```sandcastle-request
-{
-  "template": "codex",
-  "version": 1,
-  "mode": "task",
-  "prompt": "Describe the work to perform",
-  "inputs": {},
-  "constraints": [],
-  "artifactsRequested": ["result.json", "result.md"]
-}
-```
-````
+- execution strategy: `shell-command`
+- purpose: simple prompt-capable shell-command example
+- bootstrap: writes `/vercel/sandbox/wordcount.txt` and README guidance
+- prompt behavior: prompt is the target file path
+- select behavior: `WORDCOUNT_METHOD` chooses the counting method
+- follow-ups: rejected with `400`
 
-This does **not** change the public Sandcastle API shape. Sandcastle still
-returns the normal task/status payloads. The structured contract lives inside
-the sandbox through `request.json`, `result.json`, and `result.md`.
+## Prompt Behavior
 
-### Shared helper files
+Prompt shaping happens at sandbox creation time.
 
-- `template-contract.mjs`
-  exports helper functions for:
-  - extracting a `sandcastle-request` block
-  - building request envelopes
-  - building result envelopes
-  - writing JSON files cleanly
-- `show-contract.sh`
-  prints the README, contract, request example, and result example
+- `claude-agent` and `codex-agent` templates rewrite the first prompt through
+  `resolveTemplatePrompt(...)` and `buildInitialPrompt(...)`.
+- Follow-up prompts for those strategies are sent as raw user prompts into the
+  existing session/conversation state.
+- `shell-command` templates do not re-wrap follow-ups because follow-ups are not
+  supported.
 
-## `standard`
+## Catalog and Service Layer
 
-Purpose:
+The public catalog and internal template-service responses expose:
 
-- general-purpose coding
-- installs
-- preview servers
-- follow-up iteration
+- `defaultTemplateSlug`
+- strategy kind
+- whether the template accepts prompts
+- the launch-time environment schema used by the website forms
 
-Behavior:
-
-- no bootstrap files
-- no template-specific helper scripts
-- first Claude prompt is just the user prompt trimmed
-
-## `claude-code`
-
-Purpose:
-
-- clean human-first coding work
-- pragmatic implementation and debugging
-- stable request/result artifacts without heavy ceremony
-
-Behavior:
-
-- writes the shared provider-template contract files
-- supports the `sandcastle-request` prompt block when present
-- if no structured block is present, Claude is instructed to synthesize a
-  simple `request.json`
-- expects Claude to keep `result.json` and `result.md` aligned with the final
-  response
-
-First-task prompt behavior:
-
-- tells Claude this is the Sandcastle Claude Code template
-- points Claude at `show-contract.sh`, `template-contract.mjs`, `request.json`,
-  `result.json`, and `result.md`
-- tells Claude to treat a `sandcastle-request` block as the source of truth
-- tells Claude to keep the final response concise and aligned with
-  `result.json.summary`
-
-Runtime profile:
-
-- snapshot-backed when `BASE_SNAPSHOT_ID` is available
-- supports `node24` and `node22`
-- uses the standard coding preview ports
-
-## `codex`
-
-Purpose:
-
-- integration-first coding work
-- machine-readable request/result exchange
-- deterministic artifact paths for upstream systems
-
-Behavior:
-
-- writes the shared provider-template contract files
-- always expects `request.json`, `result.json`, and `result.md` to be the
-  stable artifacts for the task
-- if a `sandcastle-request` block is absent, Claude is instructed to synthesize
-  `request.json` from the plain prompt before doing other work
-
-First-task prompt behavior:
-
-- tells Claude this is the Sandcastle Codex template
-- explicitly requires a stricter workflow around `request.json` and
-  `result.json`
-- tells Claude to inspect the prompt for a `sandcastle-request` block first
-- tells Claude to use `template-contract.mjs` whenever helpful to keep the
-  envelopes valid
-- tells Claude to keep the final response tightly aligned with
-  `result.json.summary`
-
-Runtime profile:
-
-- snapshot-backed when `BASE_SNAPSHOT_ID` is available
-- supports `node24` and `node22`
-- uses the standard coding preview ports
-
-## `shell-scripts-validation`
-
-Purpose:
-
-- prove template bootstrapping works
-- prove launch env wiring works
-- prove outbound requests work
-- validate authenticated request behavior without printing secrets
-
-Files written:
-
-- `README.md`
-- `env-keys.txt`
-- `verify-runtime.sh`
-- `verify-env.sh`
-- `verify-request.sh`
-- `verify-all.sh`
-
-What the scripts do:
-
-- `verify-runtime.sh`
-  prints runtime/tool availability and lists template files
-- `verify-env.sh`
-  reads `env-keys.txt` and reports whether each key is present
-- `verify-request.sh`
-  performs a `curl` request to `VALIDATION_REQUEST_URL`, optionally with an
-  auth header
-- `verify-all.sh`
-  runs the other checks in sequence
-
-Default env behavior:
-
-- if `VALIDATION_REQUEST_URL` is not provided, Sandcastle injects its own
-  `/api/template-validation` URL by default
-
-First-task prompt behavior:
-
-- tells Claude this is the validation template
-- lists the available scripts
-- lists the env keys available in the sandbox
-- tells Claude to use the scripts rather than inventing the workflow
-- appends `User request: ...`
-
-## `webpage-inspector`
-
-Purpose:
-
-- inspect an HTTP/HTTPS page
-- collect structured diagnostics
-- render an HTML report
-- keep a preview server running for the generated report
-
-Files written:
-
-- `README.md`
-- `env-keys.txt`
-- `page-audit-lib.mjs`
-- `page-inspector.mjs`
-- `inspect-page.sh`
-- `serve-report.sh`
-- `show-summary.sh`
-- `output/latest-summary.txt`
-- `report-site/index.html`
-
-Background process:
-
-- starts a detached Python HTTP server on port `4173`
-- serves `report-site/` so the generated HTML report is previewable immediately
-
-Optional env vars:
-
-- `PAGE_AUDIT_AUTH_TOKEN`
-- `PAGE_AUDIT_AUTH_HEADER_NAME`
-- `PAGE_AUDIT_AUTH_SCHEME`
-
-What the inspector library does:
-
-- normalizes the target URL
-- fetches the page with optional auth headers
-- captures final URL, status, duration, and response headers
-- extracts:
-  - title
-  - meta description
-  - robots/meta tags
-  - OG tags
-  - canonical
-  - `html lang`
-  - viewport
-  - H1 / H2 text
-  - link/image/script/stylesheet/form counts
-- checks security headers:
-  - CSP
-  - HSTS
-  - X-Frame-Options
-  - Referrer-Policy
-  - X-Content-Type-Options
-  - Permissions-Policy
-- collects technology hints from the DOM and headers
-- probes `robots.txt` and `sitemap.xml`
-- generates:
-  - JSON report
-  - plain-text summary
-  - rendered HTML report
-
-First-task prompt behavior:
-
-- tells Claude the report server is already running
-- gives an explicit five-step required workflow
-- points Claude at the helper scripts and output paths
-- lists sandbox env keys without printing raw secret values
-- tells Claude to mention the rendered HTML report in its response
-
-## What The Website Exposes
-
-The templates API intentionally exposes catalog metadata only:
-
-- template name
-- slug
-- summary
-- runtime info
-- launch label
-
-It does not expose bootstrap code or prompt-builder internals.
-
-The website uses `envHints` to render environment-variable inputs per template.
-
-## Adding A New Template
-
-The current contract for a new built-in template is:
-
-1. Add a new template definition to
-   `projects/ai-coding-agent/middleware/lib/templates.ts`
-2. Define its:
-   - slug
-   - metadata
-   - source
-   - runtime support
-   - env hints
-   - bootstrap function
-   - initial prompt builder
-3. If it needs helper assets, generate them from a dedicated file under
-   `projects/ai-coding-agent/middleware/lib/template-assets/`
-4. If it needs a preview, declare the port and start the server during bootstrap
-5. If it needs defaults, implement them in `resolveTemplateEnvironment(...)`
-6. If SHGO should prefer it for certain tasks, update the Pack skill prompt
-
-## Practical Summary
-
-Today, a Sandcastle template is best understood as:
-
-- launch config
-- bootstrap file set
-- optional background service
-- first-prompt wrapper
-
-That is the current implementation boundary.
+This means the website launch drawers and template catalog render directly from
+template metadata rather than one-off UI logic.

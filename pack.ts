@@ -209,7 +209,7 @@ async function createSandboxTask(
 function emptyTemplateListResponse(): TemplateListResponse {
   return {
     templates: [],
-    defaultTemplateSlug: "standard",
+    defaultTemplateSlug: "claude-code",
     authUrl: null,
     errorCode: null,
     error: null,
@@ -400,9 +400,9 @@ CodeTask starts the task immediately. It may finish very fast work inline, but
 it usually returns an async acknowledgement plus a browser SandboxUrl where the
 user can follow progress live.
 
-If the user asks you to inspect, audit, diagnose, or summarize a webpage or URL
-and wants a rendered HTML report, prefer TemplateSlug = **webpage-inspector**.
-That template already includes scripts and a live report preview server for this workflow.
+If the user asks you to inspect, audit, diagnose, or summarize a webpage or URL,
+prefer TemplateSlug = **website-deep-dive**.
+That template is tuned for website research, product understanding, and technical reconnaissance.
 
 If the user explicitly asks for Claude Code, a clean coding workflow, or a
 human-first coding template, prefer TemplateSlug = **claude-code**.
@@ -567,7 +567,7 @@ ALWAYS save the SandboxToken from the response for follow-up requests.
       type: coda.ParameterType.String,
       name: "templateSlug",
       description:
-        "Optional template slug, such as standard, claude-code, codex, shell-scripts-validation, or webpage-inspector.",
+        "Optional template slug, such as claude-code, codex, website-deep-dive, or wordcount.",
       optional: true,
     }),
     coda.makeParameter({
@@ -611,8 +611,8 @@ Show the exact template Slug so the user can ask you to create a sandbox from it
 Set IncludeOwned to true when the user asks for their custom templates. When
 IncludeOwned is true, pass AuthCode too if the user has already provided a
 three-word connector code. Be ready to point out claude-code for clean coding
-work, codex for structured request/result workflows, and webpage-inspector for
-HTML webpage audits.
+work, codex for structured request/result workflows, website-deep-dive for
+website research, and wordcount for a simple shell-command example.
   `,
   parameters: [
     coda.makeParameter({

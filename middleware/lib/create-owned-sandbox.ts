@@ -13,6 +13,11 @@ import {
 } from "./tokens";
 import { startAgentTask } from "./agent-runner";
 import {
+  executionStrategyAcceptsPrompts,
+  executionStrategyRequiresAnthropicProxy,
+  formatShellCommand,
+} from "./execution-strategy";
+import {
   buildAnthropicProxyBaseUrl,
   buildSandboxUrl,
 } from "./url";
@@ -29,6 +34,25 @@ import type {
 
 export const VALID_RUNTIMES: RuntimeName[] = ["node24", "node22", "python3.13"];
 export const MAX_PROMPT_LENGTH = 100_000;
+
+function buildInitialTaskLabel(
+  template: SandcastleTemplateDefinition,
+  prompt: string
+): string {
+  if (template.executionStrategy.kind === "shell-command") {
+    const promptInput = prompt.trim() || (template.defaultPrompt ?? "");
+    if (
+      executionStrategyAcceptsPrompts(template.executionStrategy) &&
+      promptInput
+    ) {
+      return `Run shell command with input: ${promptInput}`;
+    }
+
+    return `Run shell command: ${formatShellCommand(template.executionStrategy)}`;
+  }
+
+  return prompt.trim() || (template.defaultPrompt ?? prompt);
+}
 
 function withSandboxEnvironment(
   params: Parameters<typeof Sandbox.create>[0],
@@ -145,16 +169,21 @@ export async function createOwnedSandboxTask(
 
     const sessionId = encodeSessionToken(sessionData);
     const taskFileId = randomUUID();
-    const anthropicBaseUrl = buildAnthropicProxyBaseUrl(req);
+    const anthropicBaseUrl = executionStrategyRequiresAnthropicProxy(
+      template.executionStrategy
+    )
+      ? buildAnthropicProxyBaseUrl(req)
+      : null;
     const initialPrompt = resolveTemplatePrompt(template, prompt, environment);
-    const displayPrompt = prompt.trim() || (template.defaultPrompt ?? prompt);
+    const displayPrompt = buildInitialTaskLabel(template, prompt);
 
     const cmdId = await startAgentTask(
       sandbox,
       initialPrompt,
       taskFileId,
       null,
-      anthropicBaseUrl
+      anthropicBaseUrl,
+      template.executionStrategy
     );
 
     const taskId = encodeTaskToken({
@@ -178,6 +207,7 @@ export async function createOwnedSandboxTask(
       status: "active",
       templateSlug: template.slug,
       templateName: template.name,
+      executionStrategyKind: template.executionStrategy.kind,
       envKeys,
     });
 

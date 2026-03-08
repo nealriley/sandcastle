@@ -129,11 +129,13 @@ export async function POST(req: NextRequest) {
       }
 
       const session = restored ?? fallbackSessionToken(record);
+      const effectiveStatus =
+        record.status === "active" && !restored ? "stopped" : record.status;
       sandboxes.push({
         sandboxId: record.sandboxId,
         sandboxToken: encodeSessionToken(session),
         sandboxUrl: buildSandboxUrl(req, record.latestViewToken),
-        status: record.status,
+        status: effectiveStatus,
         templateSlug: record.templateSlug ?? null,
         templateName: record.templateName ?? null,
         runtime: session.runtime,

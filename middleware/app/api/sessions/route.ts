@@ -3,7 +3,7 @@
  *
  * 1. Validates auth
  * 2. Creates a Vercel Sandbox from snapshot (or fresh)
- * 3. Starts the Claude Agent SDK runner in detached mode
+ * 3. Starts the selected execution strategy runner in detached mode
  * 4. Returns sessionId + taskId tokens immediately (< 10s)
  */
 import { NextRequest } from "next/server";
@@ -26,6 +26,10 @@ import {
   assertSessionStartTokenConfiguration,
 } from "@/lib/tokens";
 import {
+  executionStrategyAcceptsPrompts,
+  findMissingExecutionStrategyEnvironmentKeys,
+} from "@/lib/execution-strategy";
+import {
   resolveTemplateEnvironment,
   resolveTemplatePrompt,
 } from "@/lib/templates";
@@ -33,6 +37,11 @@ import {
   getDefaultTemplateSlug,
   resolveLaunchableTemplateBySlug,
 } from "@/lib/template-service";
+import {
+  normalizeSandboxEnvironment,
+  type SandboxEnvironmentEntryInput,
+} from "@/lib/sandbox-environment";
+import { listUserEnvironmentVariables } from "@/lib/user-environment";
 import { buildConnectorUrl, buildTemplateValidationUrl } from "@/lib/url";
 import { createOwnedSandboxTask, MAX_PROMPT_LENGTH, VALID_RUNTIMES } from "@/lib/create-owned-sandbox";
 import type { RuntimeName, TaskResponse } from "@/lib/types";
@@ -90,6 +99,7 @@ export async function POST(req: NextRequest) {
     runtime?: string;
     authCode?: string;
     templateSlug?: string;
+    environment?: SandboxEnvironmentEntryInput[];
   };
   try {
     body = (await req.json()) as {
@@ -97,6 +107,7 @@ export async function POST(req: NextRequest) {
       runtime?: string;
       authCode?: string;
       templateSlug?: string;
+      environment?: SandboxEnvironmentEntryInput[];
     };
   } catch {
     return Response.json(
@@ -110,20 +121,22 @@ export async function POST(req: NextRequest) {
     runtime = "node24",
     authCode,
     templateSlug = getDefaultTemplateSlug(),
+    environment = [],
   } = body;
 
-  if (!prompt || typeof prompt !== "string") {
+  if (prompt != null && typeof prompt !== "string") {
     return Response.json(
       { error: "Missing or invalid 'prompt' field" },
       { status: 400 }
     );
   }
+  const promptText = typeof prompt === "string" ? prompt : "";
 
   if (!authCode || typeof authCode !== "string") {
     return authRequiredResponse(req, "auth_required");
   }
 
-  if (prompt.length > MAX_PROMPT_LENGTH) {
+  if (promptText.length > MAX_PROMPT_LENGTH) {
     return Response.json(
       { error: `Prompt exceeds maximum length of ${MAX_PROMPT_LENGTH} characters` },
       { status: 413 }
@@ -143,13 +156,6 @@ export async function POST(req: NextRequest) {
     return Response.json(
       { error: "Missing or invalid 'templateSlug' field" },
       { status: 400 }
-    );
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json(
-      { error: "ANTHROPIC_API_KEY is not configured" },
-      { status: 500 }
     );
   }
 
@@ -185,6 +191,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (
+      executionStrategyAcceptsPrompts(template.executionStrategy) &&
+      !promptText.trim() &&
+      !template.defaultPrompt
+    ) {
+      return Response.json(
+        { error: "Missing or invalid 'prompt' field" },
+        { status: 400 }
+      );
+    }
+
     if (!template.supportedRuntimes.includes(requestedRuntime)) {
       return Response.json(
         {
@@ -207,13 +224,54 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const resolvedEnvironment = resolveTemplateEnvironment(template, {}, {
-      templateValidationUrl: buildTemplateValidationUrl(req),
-    });
+    let normalizedEnvironment;
+    try {
+      normalizedEnvironment = normalizeSandboxEnvironment(environment);
+    } catch (error) {
+      return Response.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Invalid sandbox environment configuration.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const storedEnvironmentVariables = await listUserEnvironmentVariables(
+      pairingPreview.userId
+    );
+    const storedEnvironment = Object.fromEntries(
+      storedEnvironmentVariables.map((variable) => [variable.key, variable.value])
+    );
+    const resolvedEnvironment = resolveTemplateEnvironment(
+      template,
+      {
+        ...storedEnvironment,
+        ...normalizedEnvironment.env,
+      },
+      {
+        templateValidationUrl: buildTemplateValidationUrl(req),
+      }
+    );
     const resolvedEnvKeys = Object.keys(resolvedEnvironment).sort();
+    const missingStrategyEnvKeys = findMissingExecutionStrategyEnvironmentKeys(
+      template.executionStrategy,
+      resolvedEnvironment
+    );
+
+    if (missingStrategyEnvKeys.length > 0) {
+      return Response.json(
+        {
+          error: `${template.name} requires ${missingStrategyEnvKeys.join(", ")} before launch.`,
+        },
+        { status: 400 }
+      );
+    }
 
     try {
-      resolveTemplatePrompt(template, prompt, resolvedEnvironment);
+      resolveTemplatePrompt(template, promptText, resolvedEnvironment);
     } catch (error) {
       return Response.json(
         {
@@ -234,7 +292,7 @@ export async function POST(req: NextRequest) {
     }
 
     const response = await createOwnedSandboxTask(req, {
-      prompt,
+      prompt: promptText,
       runtime: requestedRuntime,
       template,
       environment: resolvedEnvironment,
