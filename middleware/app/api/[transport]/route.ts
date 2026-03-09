@@ -39,21 +39,14 @@ function toolError(error: unknown) {
   };
 }
 
-function getToolRequest(extra: { requestInfo?: unknown }): Request {
-  if (extra.requestInfo instanceof Request) {
-    return extra.requestInfo;
-  }
-
-  return new Request("http://localhost/api/mcp");
-}
-
 const environmentEntrySchema = z.object({
   key: z.string().min(1).max(200),
   value: z.string().max(20_000),
 });
 
-const mcpHandler = createMcpHandler(
-  async (server) => {
+function createAuthenticatedMcpHandler(request: Request) {
+  const mcpHandler = createMcpHandler(
+    async (server) => {
     server.registerTool(
       "sandcastle_list_templates",
       {
@@ -83,7 +76,6 @@ const mcpHandler = createMcpHandler(
       async ({ includeStopped }, extra) => {
         try {
           const owner = getMcpOwnerFromAuth(extra);
-          const request = getToolRequest(extra);
           const sandboxes = await listMcpSandboxes(
             request,
             owner,
@@ -118,7 +110,6 @@ const mcpHandler = createMcpHandler(
       async ({ templateSlug, prompt, runtime, environment }, extra) => {
         try {
           const owner = getMcpOwnerFromAuth(extra);
-          const request = getToolRequest(extra);
           const task = await launchMcpSandbox(request, owner, {
             templateSlug,
             prompt,
@@ -145,7 +136,6 @@ const mcpHandler = createMcpHandler(
       async ({ sandboxId }, extra) => {
         try {
           const owner = getMcpOwnerFromAuth(extra);
-          const request = getToolRequest(extra);
           const sandbox = await getMcpSandboxView(request, owner, sandboxId);
           const presentation = buildMcpSandboxPresentation(sandbox);
           return jsonToolResult(presentation.payload, presentation.summary);
@@ -169,7 +159,6 @@ const mcpHandler = createMcpHandler(
       async ({ sandboxId, prompt }, extra) => {
         try {
           const owner = getMcpOwnerFromAuth(extra);
-          const request = getToolRequest(extra);
           const task = await continueMcpSandbox(request, owner, {
             sandboxId,
             prompt,
@@ -222,35 +211,41 @@ const mcpHandler = createMcpHandler(
         }
       }
     );
-  },
-  {
-    serverInfo: {
-      name: "sandcastle",
-      version: "1.0.0",
     },
-  },
-  {
-    basePath: "/api",
-    disableSse: true,
-    maxDuration: 60,
-    onEvent(event) {
-      if (event.type === "REQUEST_RECEIVED" || event.type === "REQUEST_COMPLETED" || event.type === "ERROR") {
-        console.log(
-          JSON.stringify({
-            namespace: "sandcastle.mcp",
-            ...event,
-          })
-        );
-      }
+    {
+      serverInfo: {
+        name: "sandcastle",
+        version: "1.0.0",
+      },
     },
-  }
-);
+    {
+      basePath: "/api",
+      disableSse: true,
+      maxDuration: 60,
+      onEvent(event) {
+        if (
+          event.type === "REQUEST_RECEIVED" ||
+          event.type === "REQUEST_COMPLETED" ||
+          event.type === "ERROR"
+        ) {
+          console.log(
+            JSON.stringify({
+              namespace: "sandcastle.mcp",
+              requestUrl: request.url,
+              ...event,
+            })
+          );
+        }
+      },
+    }
+  );
 
-const authenticatedMcpHandler = withMcpAuth(mcpHandler, verifyMcpAccessToken, {
-  required: true,
-  requiredScopes: ["mcp"],
-  resourceMetadataPath: "/.well-known/oauth-protected-resource/api/mcp",
-});
+  return withMcpAuth(mcpHandler, verifyMcpAccessToken, {
+    required: true,
+    requiredScopes: ["mcp"],
+    resourceMetadataPath: "/.well-known/oauth-protected-resource/api/mcp",
+  });
+}
 
 async function handleMcpRequest(
   req: Request,
@@ -261,6 +256,7 @@ async function handleMcpRequest(
     return new Response("Not found", { status: 404 });
   }
 
+  const authenticatedMcpHandler = createAuthenticatedMcpHandler(req);
   return authenticatedMcpHandler(req);
 }
 
