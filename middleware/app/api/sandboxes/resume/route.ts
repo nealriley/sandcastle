@@ -17,10 +17,14 @@ import { normalizePairingCode, readPairingCode } from "@/lib/pairing";
 import { restoreOwnedSandboxSession } from "@/lib/owned-sandbox";
 import { buildConnectorUrl } from "@/lib/url";
 import { startSandboxFollowUpTask } from "@/lib/sandbox-follow-up";
+import { getErrorMessage } from "@/lib/route-errors";
 import type { SessionOwnershipRecord, SessionToken, TaskResponse } from "@/lib/types";
 
 const MAX_PROMPT_LENGTH = 100_000;
 const DEFAULT_PORTS = [3000, 5173, 8888];
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function fallbackSessionToken(record: SessionOwnershipRecord): SessionToken {
   return {
@@ -85,48 +89,48 @@ function authRequiredResponse(
 }
 
 export async function POST(req: NextRequest) {
-  let body: { authCode?: string; sandboxId?: string; prompt?: string };
   try {
-    body = (await req.json()) as {
-      authCode?: string;
-      sandboxId?: string;
-      prompt?: string;
-    };
-  } catch {
-    return Response.json(
-      { error: "Invalid JSON in request body" },
-      { status: 400 }
-    );
-  }
+    let body: { authCode?: string; sandboxId?: string; prompt?: string };
+    try {
+      body = (await req.json()) as {
+        authCode?: string;
+        sandboxId?: string;
+        prompt?: string;
+      };
+    } catch {
+      return Response.json(
+        { error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
+    }
 
-  const { authCode, sandboxId, prompt } = body;
+    const { authCode, sandboxId, prompt } = body;
 
-  if (!authCode || typeof authCode !== "string") {
-    return authRequiredResponse(req, "auth_required");
-  }
+    if (!authCode || typeof authCode !== "string") {
+      return authRequiredResponse(req, "auth_required");
+    }
 
-  if (!sandboxId || typeof sandboxId !== "string") {
-    return Response.json(
-      { error: "Missing or invalid 'sandboxId' field" },
-      { status: 400 }
-    );
-  }
+    if (!sandboxId || typeof sandboxId !== "string") {
+      return Response.json(
+        { error: "Missing or invalid 'sandboxId' field" },
+        { status: 400 }
+      );
+    }
 
-  if (!prompt || typeof prompt !== "string") {
-    return Response.json(
-      { error: "Missing or invalid 'prompt' field" },
-      { status: 400 }
-    );
-  }
+    if (!prompt || typeof prompt !== "string") {
+      return Response.json(
+        { error: "Missing or invalid 'prompt' field" },
+        { status: 400 }
+      );
+    }
 
-  if (prompt.length > MAX_PROMPT_LENGTH) {
-    return Response.json(
-      { error: `Prompt exceeds maximum length of ${MAX_PROMPT_LENGTH} characters` },
-      { status: 413 }
-    );
-  }
+    if (prompt.length > MAX_PROMPT_LENGTH) {
+      return Response.json(
+        { error: `Prompt exceeds maximum length of ${MAX_PROMPT_LENGTH} characters` },
+        { status: 413 }
+      );
+    }
 
-  try {
     let normalizedAuthCode: string | null = null;
     try {
       normalizedAuthCode = normalizePairingCode(authCode);
@@ -201,10 +205,7 @@ export async function POST(req: NextRequest) {
     console.error("Failed to resume sandbox:", error);
     return Response.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to resume sandbox",
+        error: getErrorMessage(error, "Failed to resume sandbox"),
       },
       { status: 500 }
     );

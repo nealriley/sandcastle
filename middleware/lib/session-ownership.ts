@@ -8,6 +8,7 @@ import type { ExecutionStrategy } from "./template-service-types";
 import { getRedis } from "./redis";
 
 type SessionOwnershipRedis = {
+  del(key: string): Promise<number>;
   expire(key: string, seconds: number): Promise<unknown>;
   get<T>(key: string): Promise<T | null>;
   set(
@@ -28,7 +29,7 @@ type SessionOwnershipRedis = {
 };
 
 const OWNERSHIP_TTL_SECONDS = 7 * 24 * 60 * 60;
-const MAX_LISTED_SESSIONS = 25;
+const MAX_LISTED_SESSIONS = 100;
 
 function sessionKeyKey(sessionKey: string): string {
   return `session:${sessionKey}`;
@@ -36,6 +37,10 @@ function sessionKeyKey(sessionKey: string): string {
 
 function userSessionsKey(userId: string): string {
   return `user_sessions:${userId}`;
+}
+
+function userSandboxKey(userId: string, sandboxId: string): string {
+  return `user_sandbox:${userId}:${sandboxId}`;
 }
 
 export async function touchOwnedSession(args: {
@@ -96,6 +101,11 @@ export async function touchOwnedSessionInRedis(
     score: record.updatedAt,
     member: args.session.sessionKey,
   });
+  await redis.set(
+    userSandboxKey(args.session.ownerUserId, args.session.sandboxId),
+    args.session.sessionKey,
+    { ex: OWNERSHIP_TTL_SECONDS }
+  );
   await redis.expire(userSessionsKey(args.session.ownerUserId), OWNERSHIP_TTL_SECONDS);
 
   return record;
@@ -160,8 +170,31 @@ export async function findOwnedSessionBySandboxIdInRedis(
   userId: string,
   sandboxId: string
 ): Promise<SessionOwnershipRecord | null> {
+  const indexedSessionKey = await redis.get<string>(userSandboxKey(userId, sandboxId));
+  if (indexedSessionKey) {
+    const indexedRecord = await redis.get<SessionOwnershipRecord>(
+      sessionKeyKey(indexedSessionKey)
+    );
+    if (
+      indexedRecord &&
+      indexedRecord.ownerUserId === userId &&
+      indexedRecord.sandboxId === sandboxId
+    ) {
+      return indexedRecord;
+    }
+
+    await redis.del(userSandboxKey(userId, sandboxId));
+  }
+
   const records = await listOwnedSessionsInRedis(redis, userId);
-  return records.find((record) => record.sandboxId === sandboxId) ?? null;
+  const match = records.find((record) => record.sandboxId === sandboxId) ?? null;
+  if (match) {
+    await redis.set(userSandboxKey(userId, sandboxId), match.sessionKey, {
+      ex: OWNERSHIP_TTL_SECONDS,
+    });
+  }
+
+  return match;
 }
 
 export function ownedSessionStatus(

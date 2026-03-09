@@ -147,6 +147,42 @@ test("findOwnedSessionBySandboxId returns only the signed-in user's matching san
   assert.equal(match?.sessionKey, "session_match");
 });
 
+test("findOwnedSessionBySandboxId uses the direct owner+sandbox index even when the session falls outside the recent list window", async () => {
+  await touchOwnedSessionInRedis(fakeRedis, {
+    session: sessionToken({
+      sessionKey: "session_oldest",
+      sandboxId: "sb_very_old",
+      createdAt: 1_000,
+      viewToken: "view_oldest",
+    }),
+    updatedAt: 1_000,
+    latestPrompt: "Oldest",
+    status: "active",
+  });
+
+  for (let index = 0; index < 110; index += 1) {
+    await touchOwnedSessionInRedis(fakeRedis, {
+      session: sessionToken({
+        sessionKey: `session_${index}`,
+        sandboxId: `sb_${index}`,
+        createdAt: 2_000 + index,
+        viewToken: `view_${index}`,
+      }),
+      updatedAt: 2_000 + index,
+      latestPrompt: `Prompt ${index}`,
+      status: "active",
+    });
+  }
+
+  const match = await findOwnedSessionBySandboxIdInRedis(
+    fakeRedis,
+    "user_123",
+    "sb_very_old"
+  );
+
+  assert.equal(match?.sessionKey, "session_oldest");
+});
+
 test("ownedSessionStatus reports stopped when either the session or task is stopped", () => {
   assert.equal(ownedSessionStatus(false, "running"), "active");
   assert.equal(ownedSessionStatus(true, "running"), "stopped");

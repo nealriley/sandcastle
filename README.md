@@ -65,6 +65,8 @@ Current execution strategies:
 - [`docs/current-state-audit.md`](docs/current-state-audit.md)
 - [`docs/templates.md`](docs/templates.md)
 - [`docs/architecture.md`](docs/architecture.md)
+- [`docs/route-handler-reliability.md`](docs/route-handler-reliability.md)
+- [`docs/connector-auth-stability.md`](docs/connector-auth-stability.md)
 - [`TASKS.md`](TASKS.md)
 
 ## Local Verification

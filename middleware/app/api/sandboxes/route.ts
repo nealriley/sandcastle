@@ -13,6 +13,7 @@ import {
   listSystemTemplateSummaries,
 } from "@/lib/template-service";
 import { buildConnectorUrl, buildSandboxUrl } from "@/lib/url";
+import { getErrorMessage } from "@/lib/route-errors";
 import type {
   SandboxListResponse,
   SandboxSummary,
@@ -21,6 +22,9 @@ import type {
 } from "@/lib/types";
 
 const DEFAULT_PORTS = [3000, 5173, 8888];
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function authRequiredResponse(
   req: NextRequest,
@@ -76,98 +80,105 @@ function matchesQuery(record: SessionOwnershipRecord, query: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  let body: {
-    authCode?: string;
-    query?: string;
-    includeStopped?: boolean;
-  };
   try {
-    body = (await req.json()) as {
+    let body: {
       authCode?: string;
       query?: string;
       includeStopped?: boolean;
     };
-  } catch {
-    return Response.json(
-      { error: "Invalid JSON in request body" },
-      { status: 400 }
-    );
-  }
-
-  const { authCode, query, includeStopped = false } = body;
-  if (!authCode || typeof authCode !== "string") {
-    return authRequiredResponse(req, "auth_required");
-  }
-
-  try {
-    let normalizedAuthCode: string | null = null;
     try {
-      normalizedAuthCode = normalizePairingCode(authCode);
-    } catch {}
-
-    await enforcePairingRedemptionLimits(normalizedAuthCode);
-
-    const pairing = await readPairingCode(authCode);
-    if (!pairing) {
-      return authRequiredResponse(req, "invalid_auth_code");
+      body = (await req.json()) as {
+        authCode?: string;
+        query?: string;
+        includeStopped?: boolean;
+      };
+    } catch {
+      return Response.json(
+        { error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
     }
 
-    const normalizedQuery = typeof query === "string" ? query.trim().toLowerCase() : "";
-    const owned = await listOwnedSessions(pairing.userId);
-    const filtered = owned.filter((record) => {
-      if (!includeStopped && record.status !== "active") {
-        return false;
-      }
-      return matchesQuery(record, normalizedQuery);
-    });
+    const { authCode, query, includeStopped = false } = body;
+    if (!authCode || typeof authCode !== "string") {
+      return authRequiredResponse(req, "auth_required");
+    }
 
-    const sandboxes: SandboxSummary[] = [];
-    for (const record of filtered) {
-      const restored = await restoreOwnedSandboxSession(record);
-      if (!restored && record.status === "active" && !includeStopped) {
-        continue;
+    try {
+      let normalizedAuthCode: string | null = null;
+      try {
+        normalizedAuthCode = normalizePairingCode(authCode);
+      } catch {}
+
+      await enforcePairingRedemptionLimits(normalizedAuthCode);
+
+      const pairing = await readPairingCode(authCode);
+      if (!pairing) {
+        return authRequiredResponse(req, "invalid_auth_code");
       }
 
-      const session = restored ?? fallbackSessionToken(record);
-      const effectiveStatus =
-        record.status === "active" && !restored ? "stopped" : record.status;
-      sandboxes.push({
-        sandboxId: record.sandboxId,
-        sandboxToken: encodeSessionToken(session),
-        sandboxUrl: buildSandboxUrl(req, record.latestViewToken),
-        status: effectiveStatus,
-        templateSlug: record.templateSlug ?? null,
-        templateName: record.templateName ?? null,
-        runtime: session.runtime,
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-        latestPrompt: record.latestPrompt,
+      const normalizedQuery = typeof query === "string" ? query.trim().toLowerCase() : "";
+      const owned = await listOwnedSessions(pairing.userId);
+      const filtered = owned.filter((record) => {
+        if (!includeStopped && record.status !== "active") {
+          return false;
+        }
+        return matchesQuery(record, normalizedQuery);
       });
+
+      const sandboxes: SandboxSummary[] = [];
+      for (const record of filtered) {
+        const restored = await restoreOwnedSandboxSession(record);
+        if (!restored && record.status === "active" && !includeStopped) {
+          continue;
+        }
+
+        const session = restored ?? fallbackSessionToken(record);
+        const effectiveStatus =
+          record.status === "active" && !restored ? "stopped" : record.status;
+        sandboxes.push({
+          sandboxId: record.sandboxId,
+          sandboxToken: encodeSessionToken(session),
+          sandboxUrl: buildSandboxUrl(req, record.latestViewToken),
+          status: effectiveStatus,
+          templateSlug: record.templateSlug ?? null,
+          templateName: record.templateName ?? null,
+          runtime: session.runtime,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          latestPrompt: record.latestPrompt,
+        });
+      }
+
+      const response: SandboxListResponse = {
+        sandboxes,
+        templates: await listLaunchableTemplateSummaries(pairing.userId),
+        authUrl: null,
+        errorCode: null,
+        error: null,
+      };
+
+      return Response.json(response, {
+        headers: { "Cache-Control": "no-store" },
+      });
+    } catch (error) {
+      if (isRateLimitError(error)) {
+        return rateLimitResponse(error);
+      }
+
+      console.error("Failed to list sandboxes:", error);
+      return Response.json(
+        {
+          error: getErrorMessage(error, "Failed to list owned sandboxes"),
+        },
+        { status: 500 }
+      );
     }
-
-    const response: SandboxListResponse = {
-      sandboxes,
-      templates: await listLaunchableTemplateSummaries(pairing.userId),
-      authUrl: null,
-      errorCode: null,
-      error: null,
-    };
-
-    return Response.json(response, {
-      headers: { "Cache-Control": "no-store" },
-    });
   } catch (error) {
-    if (isRateLimitError(error)) {
-      return rateLimitResponse(error);
-    }
-
-    console.error("Failed to list sandboxes:", error);
+    console.error("Unhandled /api/sandboxes route failure:", error);
     return Response.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to list owned sandboxes",
+        error: getErrorMessage(error, "Failed to list owned sandboxes"),
       },
       { status: 500 }
     );

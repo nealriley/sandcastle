@@ -1,7 +1,7 @@
 # Sandcastle Architecture
 
 Status: current repo architecture
-Date: March 8, 2026
+Date: March 9, 2026
 
 ## Overview
 
@@ -128,6 +128,8 @@ Strategy-specific runners provide:
 - new sandbox creation and owned-sandbox listing require a three-word connector
   code
 - pairing codes are short-lived, single-use for redemption, and stored in Redis
+- SHGO is still the least stable auth surface because it uses an ephemeral
+  manual grant instead of a first-class OAuth grant
 
 ### MCP OAuth
 
@@ -212,3 +214,10 @@ Middleware and Pack ship separately.
 That means a green middleware deploy does not automatically publish new Pack
 behavior, and a Pack upload alone does not make a version installable until the
 release step succeeds.
+
+## Additional Design Notes
+
+For current operational guidance, also see:
+
+- [`route-handler-reliability.md`](route-handler-reliability.md)
+- [`connector-auth-stability.md`](connector-auth-stability.md)

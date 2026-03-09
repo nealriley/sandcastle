@@ -1,6 +1,6 @@
 # Sandcastle Task List
 
-Last updated: March 8, 2026
+Last updated: March 9, 2026
 
 ## Shipped Baseline
 
@@ -29,6 +29,8 @@ Last updated: March 8, 2026
 - [x] Keep repo docs aligned with the current shipped product
 - [x] Keep Pack vocabulary aligned with the current template catalog
 - [x] Record the current audited system state in `docs/current-state-audit.md`
+- [x] Document route-handler reliability rules for critical Next.js endpoints
+- [x] Document current connector auth model and Pack OAuth migration constraints
 
 ### Verification and Coverage
 
@@ -36,6 +38,14 @@ Last updated: March 8, 2026
 - [ ] Expand route-level tests for provider fallback and launch validation
 - [ ] Expand smoke coverage for Codex, Website Deep Dive, and schema-driven launch fields
 - [ ] Add browser-level E2E coverage for dashboard, marketplace, environment, and session viewer flows
+- [ ] Add cross-connector smoke coverage: create via MCP, then access via SHGO
+- [ ] Add cross-connector smoke coverage: create via SHGO, then inspect via MCP
+
+### Connector Auth Stabilization
+
+- [ ] Stop relying on recent-session scans for exact sandbox lookup
+- [ ] Make owned-sandbox listing limits explicit and configurable
+- [ ] Decide whether SHGO should remain pairing-code based or move to Pack OAuth2 user auth
 
 ### Cleanup
 

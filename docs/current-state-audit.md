@@ -122,6 +122,10 @@ Current `wordcount` behavior:
 - browser/UI flows are still mostly protected by manual testing
 - route-level launch validation coverage is thinner than core library coverage
 - dormant references to retired built-ins still exist in historical assets and older planning context
+- SHGO and MCP still share ownership through website `user.id`, but they do not
+  yet share one connector-grant model
+- SHGO owned-sandbox access has historically depended too much on recent-session
+  lookup windows instead of exact owner+sandbox indexing
 
 ## Current Confidence
 
@@ -144,3 +148,4 @@ Primary risk areas:
 2. expand smoke coverage for the live template set
 3. add browser E2E coverage for the highest-value website flows
 4. remove or archive dead references to retired templates once rollout confidence is high
+5. stabilize cross-connector auth and decide whether SHGO should remain pairing-code based or move toward Pack OAuth
