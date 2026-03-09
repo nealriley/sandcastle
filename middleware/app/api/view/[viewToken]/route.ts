@@ -18,6 +18,16 @@ import { buildSandboxUrl } from "@/lib/url";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function safeLogSessionDiagnostic(
+  args: Parameters<typeof logSessionDiagnostic>[0]
+) {
+  try {
+    logSessionDiagnostic(args);
+  } catch (error) {
+    console.error("Failed to emit session diagnostic:", error);
+  }
+}
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -80,199 +90,213 @@ export async function GET(
   let recordForFallback: Awaited<ReturnType<typeof getOwnedSession>> | null = null;
 
   try {
-    const routeParams = await params;
-    viewToken =
-      typeof routeParams?.viewToken === "string" ? routeParams.viewToken : "";
-    if (!viewToken) {
-      return NextResponse.json(
-        { error: "Missing sandbox view token." },
-        { status: 400 }
-      );
-    }
+    try {
+      const routeParams = await params;
+      viewToken =
+        typeof routeParams?.viewToken === "string" ? routeParams.viewToken : "";
+      if (!viewToken) {
+        return NextResponse.json(
+          { error: "Missing sandbox view token." },
+          { status: 400 }
+        );
+      }
 
-    const user = await getWebsiteUser();
-    viewerUserId = user?.id ?? null;
+      const user = await getWebsiteUser();
+      viewerUserId = user?.id ?? null;
 
-    if (!user) {
-      logSessionDiagnostic({
-        event: "view_route_unauthenticated",
-        level: "warn",
-        data: {
-          httpStatus: 401,
-          viewTokenTail: viewToken.slice(-8),
-        },
+      if (!user) {
+        safeLogSessionDiagnostic({
+          event: "view_route_unauthenticated",
+          level: "warn",
+          data: {
+            httpStatus: 401,
+            viewTokenTail: viewToken.slice(-8),
+          },
+        });
+        return NextResponse.json(
+          { error: "Sign in is required to view this sandbox." },
+          { status: 401 }
+        );
+      }
+
+      const viewData = decodeViewToken(viewToken);
+      sandboxIdForFallback = viewData.sandboxId;
+      sessionKeyForFallback = viewData.sessionKey;
+      const record = await getOwnedSession(viewData.sessionKey);
+      recordForFallback = record;
+      const access = evaluateSessionViewAccess({
+        viewerUserId: user?.id ?? null,
+        tokenOwnerUserId: viewData.ownerUserId,
+        recordOwnerUserId: record?.ownerUserId ?? null,
       });
-      return NextResponse.json(
-        { error: "Sign in is required to view this sandbox." },
-        { status: 401 }
-      );
-    }
 
-    const viewData = decodeViewToken(viewToken);
-    sandboxIdForFallback = viewData.sandboxId;
-    sessionKeyForFallback = viewData.sessionKey;
-    const record = await getOwnedSession(viewData.sessionKey);
-    recordForFallback = record;
-    const access = evaluateSessionViewAccess({
-      viewerUserId: user?.id ?? null,
-      tokenOwnerUserId: viewData.ownerUserId,
-      recordOwnerUserId: record?.ownerUserId ?? null,
-    });
+      if (access.kind === "unauthenticated") {
+        safeLogSessionDiagnostic({
+          event: "view_route_unauthenticated",
+          level: "warn",
+          data: {
+            httpStatus: 401,
+            sandboxId: viewData.sandboxId,
+            sessionKey: viewData.sessionKey,
+            viewerUserId: user.id,
+            record: summarizeOwnedSessionRecordForDiagnostics(record),
+          },
+        });
+        return NextResponse.json(
+          { error: "Sign in is required to view this sandbox." },
+          { status: 401 }
+        );
+      }
 
-    if (access.kind === "unauthenticated") {
-      logSessionDiagnostic({
-        event: "view_route_unauthenticated",
-        level: "warn",
-        data: {
-          httpStatus: 401,
-          sandboxId: viewData.sandboxId,
-          sessionKey: viewData.sessionKey,
-          viewerUserId: user.id,
-          record: summarizeOwnedSessionRecordForDiagnostics(record),
-        },
+      if (access.kind === "forbidden") {
+        safeLogSessionDiagnostic({
+          event: "view_route_forbidden",
+          level: "warn",
+          data: {
+            httpStatus: 403,
+            sandboxId: viewData.sandboxId,
+            sessionKey: viewData.sessionKey,
+            viewerUserId: user.id,
+            ownerUserId: access.ownerUserId,
+            record: summarizeOwnedSessionRecordForDiagnostics(record),
+          },
+        });
+        return NextResponse.json(
+          { error: "This sandbox belongs to a different signed-in user." },
+          { status: 403 }
+        );
+      }
+
+      const sandbox = await Sandbox.get({ sandboxId: viewData.sandboxId });
+      const state = await readSessionState(sandbox);
+      if (!state) {
+        safeLogSessionDiagnostic({
+          event: "view_route_state_missing",
+          level: "warn",
+          data: {
+            httpStatus: 200,
+            sandboxId: viewData.sandboxId,
+            sessionKey: viewData.sessionKey,
+            viewerUserId: user.id,
+            record: summarizeOwnedSessionRecordForDiagnostics(record),
+          },
+        });
+        return NextResponse.json(
+          stoppedView(req, viewToken, viewData.sandboxId, {
+            sessionKey: viewData.sessionKey,
+            templateSlug: record?.templateSlug ?? null,
+            templateName: record?.templateName ?? null,
+            executionStrategyKind: record?.executionStrategyKind ?? null,
+            envKeys: record?.envKeys ?? [],
+          }),
+          {
+            headers: { "Cache-Control": "no-store" },
+          }
+        );
+      }
+
+      const session: SessionToken = {
+        sessionKey: viewData.sessionKey,
+        sandboxId: viewData.sandboxId,
+        agentSessionId: state.agentSessionId,
+        runtime: state.runtime,
+        ports: state.ports,
+        createdAt: state.createdAt,
+        viewToken,
+        ownerUserId: access.ownerUserId,
+        ownerLogin: record?.ownerLogin ?? state.ownerLogin ?? null,
+      };
+
+      const response = await buildSessionView(req, sandbox, session);
+      response.templateSlug = record?.templateSlug ?? null;
+      response.templateName = record?.templateName ?? null;
+      response.executionStrategyKind = record?.executionStrategyKind ?? null;
+      response.envKeys = normalizeStringArray(record?.envKeys);
+
+      if (
+        response.status !== "running" ||
+        response.error != null ||
+        response.tasks.length === 0 ||
+        response.phase === "stalled"
+      ) {
+        safeLogSessionDiagnostic({
+          event: "view_route_anomalous_response",
+          data: {
+            httpStatus: 200,
+            sandboxId: viewData.sandboxId,
+            sessionKey: viewData.sessionKey,
+            viewerUserId: user.id,
+            record: summarizeOwnedSessionRecordForDiagnostics(record),
+            state: summarizeSessionStateForDiagnostics(state),
+            response: summarizeSessionViewForDiagnostics(response),
+          },
+        });
+      }
+
+      return NextResponse.json(response, {
+        headers: { "Cache-Control": "no-store" },
       });
-      return NextResponse.json(
-        { error: "Sign in is required to view this sandbox." },
-        { status: 401 }
-      );
-    }
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message.includes("not found") || error.message.includes("ENOENT"))
+      ) {
+        safeLogSessionDiagnostic({
+          event: "view_route_sandbox_missing",
+          level: "warn",
+          data: {
+            httpStatus: 200,
+            sandboxId: sandboxIdForFallback,
+            sessionKey: sessionKeyForFallback,
+            viewerUserId,
+            error: error.message,
+            record: summarizeOwnedSessionRecordForDiagnostics(recordForFallback),
+          },
+        });
+        return NextResponse.json(
+          stoppedView(req, viewToken, sandboxIdForFallback, {
+            sessionKey: sessionKeyForFallback,
+            templateSlug: recordForFallback?.templateSlug ?? null,
+            templateName: recordForFallback?.templateName ?? null,
+            executionStrategyKind:
+              recordForFallback?.executionStrategyKind ?? null,
+            envKeys: recordForFallback?.envKeys ?? [],
+          }),
+          {
+            headers: { "Cache-Control": "no-store" },
+          }
+        );
+      }
 
-    if (access.kind === "forbidden") {
-      logSessionDiagnostic({
-        event: "view_route_forbidden",
-        level: "warn",
+      safeLogSessionDiagnostic({
+        event: "view_route_failed",
+        level: "error",
         data: {
-          httpStatus: 403,
-          sandboxId: viewData.sandboxId,
-          sessionKey: viewData.sessionKey,
-          viewerUserId: user.id,
-          ownerUserId: access.ownerUserId,
-          record: summarizeOwnedSessionRecordForDiagnostics(record),
-        },
-      });
-      return NextResponse.json(
-        { error: "This sandbox belongs to a different signed-in user." },
-        { status: 403 }
-      );
-    }
-
-    const sandbox = await Sandbox.get({ sandboxId: viewData.sandboxId });
-    const state = await readSessionState(sandbox);
-    if (!state) {
-      logSessionDiagnostic({
-        event: "view_route_state_missing",
-        level: "warn",
-        data: {
-          httpStatus: 200,
-          sandboxId: viewData.sandboxId,
-          sessionKey: viewData.sessionKey,
-          viewerUserId: user.id,
-          record: summarizeOwnedSessionRecordForDiagnostics(record),
-        },
-      });
-      return NextResponse.json(
-        stoppedView(req, viewToken, viewData.sandboxId, {
-          sessionKey: viewData.sessionKey,
-          templateSlug: record?.templateSlug ?? null,
-          templateName: record?.templateName ?? null,
-          executionStrategyKind: record?.executionStrategyKind ?? null,
-          envKeys: record?.envKeys ?? [],
-        }),
-        {
-          headers: { "Cache-Control": "no-store" },
-        }
-      );
-    }
-
-    const session: SessionToken = {
-      sessionKey: viewData.sessionKey,
-      sandboxId: viewData.sandboxId,
-      agentSessionId: state.agentSessionId,
-      runtime: state.runtime,
-      ports: state.ports,
-      createdAt: state.createdAt,
-      viewToken,
-      ownerUserId: access.ownerUserId,
-      ownerLogin: record?.ownerLogin ?? state.ownerLogin ?? null,
-    };
-
-    const response = await buildSessionView(req, sandbox, session);
-    response.templateSlug = record?.templateSlug ?? null;
-    response.templateName = record?.templateName ?? null;
-    response.executionStrategyKind = record?.executionStrategyKind ?? null;
-    response.envKeys = normalizeStringArray(record?.envKeys);
-
-    if (
-      response.status !== "running" ||
-      response.error != null ||
-      response.tasks.length === 0 ||
-      response.phase === "stalled"
-    ) {
-      logSessionDiagnostic({
-        event: "view_route_anomalous_response",
-        data: {
-          httpStatus: 200,
-          sandboxId: viewData.sandboxId,
-          sessionKey: viewData.sessionKey,
-          viewerUserId: user.id,
-          record: summarizeOwnedSessionRecordForDiagnostics(record),
-          state: summarizeSessionStateForDiagnostics(state),
-          response: summarizeSessionViewForDiagnostics(response),
-        },
-      });
-    }
-
-    return NextResponse.json(response, {
-      headers: { "Cache-Control": "no-store" },
-    });
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      (error.message.includes("not found") || error.message.includes("ENOENT"))
-    ) {
-      logSessionDiagnostic({
-        event: "view_route_sandbox_missing",
-        level: "warn",
-        data: {
-          httpStatus: 200,
+          httpStatus: 500,
           sandboxId: sandboxIdForFallback,
           sessionKey: sessionKeyForFallback,
           viewerUserId,
-          error: error.message,
-          record: summarizeOwnedSessionRecordForDiagnostics(recordForFallback),
+          error: error instanceof Error ? error.message : String(error),
         },
       });
+      console.error("Failed to read public sandbox view:", error);
       return NextResponse.json(
-        stoppedView(req, viewToken, sandboxIdForFallback, {
-          sessionKey: sessionKeyForFallback,
-          templateSlug: recordForFallback?.templateSlug ?? null,
-          templateName: recordForFallback?.templateName ?? null,
-          executionStrategyKind: recordForFallback?.executionStrategyKind ?? null,
-          envKeys: recordForFallback?.envKeys ?? [],
-        }),
         {
-          headers: { "Cache-Control": "no-store" },
-        }
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to read sandbox view",
+        },
+        { status: 500 }
       );
     }
-
-    logSessionDiagnostic({
-      event: "view_route_failed",
-      level: "error",
-      data: {
-        httpStatus: 500,
-        sandboxId: sandboxIdForFallback,
-        sessionKey: sessionKeyForFallback,
-        viewerUserId,
-        error: error instanceof Error ? error.message : String(error),
-      },
-    });
-    console.error("Failed to read public sandbox view:", error);
+  } catch (unhandledError) {
+    console.error("Unhandled sandbox view route failure:", unhandledError);
     return NextResponse.json(
       {
         error:
-          error instanceof Error
-            ? error.message
+          unhandledError instanceof Error
+            ? unhandledError.message
             : "Failed to read sandbox view",
       },
       { status: 500 }
