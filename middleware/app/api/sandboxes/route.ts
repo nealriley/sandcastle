@@ -26,10 +26,10 @@ const DEFAULT_PORTS = [3000, 5173, 8888];
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function authRequiredResponse(
+function authRequiredPayload(
   req: NextRequest,
   errorCode: "auth_required" | "invalid_auth_code"
-) {
+) : SandboxListResponse {
   const authUrl = buildConnectorUrl(req);
   const error =
     errorCode === "auth_required"
@@ -44,7 +44,7 @@ function authRequiredResponse(
     error,
   };
 
-  return Response.json(response, { status: 401 });
+  return response;
 }
 
 function fallbackSessionToken(record: SessionOwnershipRecord): SessionToken {
@@ -101,7 +101,9 @@ export async function POST(req: NextRequest) {
 
     const { authCode, query, includeStopped = false } = body;
     if (!authCode || typeof authCode !== "string") {
-      return authRequiredResponse(req, "auth_required");
+      return Response.json(authRequiredPayload(req, "auth_required"), {
+        status: 401,
+      });
     }
 
     try {
@@ -114,7 +116,9 @@ export async function POST(req: NextRequest) {
 
       const pairing = await readPairingCode(authCode);
       if (!pairing) {
-        return authRequiredResponse(req, "invalid_auth_code");
+        return Response.json(authRequiredPayload(req, "invalid_auth_code"), {
+          status: 401,
+        });
       }
 
       const normalizedQuery = typeof query === "string" ? query.trim().toLowerCase() : "";

@@ -43,10 +43,10 @@ function fallbackSessionToken(record: SessionOwnershipRecord): SessionToken {
   };
 }
 
-function authRequiredResponse(
+function authRequiredPayload(
   req: NextRequest,
   errorCode: "auth_required" | "invalid_auth_code"
-) {
+) : TaskResponse {
   const authUrl = buildConnectorUrl(req);
   const error =
     errorCode === "auth_required"
@@ -85,7 +85,7 @@ function authRequiredResponse(
     error,
   };
 
-  return Response.json(response, { status: 401 });
+  return response;
 }
 
 export async function POST(req: NextRequest) {
@@ -107,7 +107,9 @@ export async function POST(req: NextRequest) {
     const { authCode, sandboxId, prompt } = body;
 
     if (!authCode || typeof authCode !== "string") {
-      return authRequiredResponse(req, "auth_required");
+      return Response.json(authRequiredPayload(req, "auth_required"), {
+        status: 401,
+      });
     }
 
     if (!sandboxId || typeof sandboxId !== "string") {
@@ -140,7 +142,9 @@ export async function POST(req: NextRequest) {
 
     const pairing = await readPairingCode(authCode);
     if (!pairing) {
-      return authRequiredResponse(req, "invalid_auth_code");
+      return Response.json(authRequiredPayload(req, "invalid_auth_code"), {
+        status: 401,
+      });
     }
 
     const record = await findOwnedSessionBySandboxId(pairing.userId, sandboxId);

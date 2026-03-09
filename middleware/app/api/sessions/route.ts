@@ -8,10 +8,6 @@
  */
 import { NextRequest } from "next/server";
 import {
-  tokenConfigurationErrorResponse,
-  validateAuth,
-} from "@/lib/auth";
-import {
   normalizePairingCode,
   readPairingCode,
   redeemPairingCode,
@@ -50,14 +46,17 @@ import type { RuntimeName, TaskResponse } from "@/lib/types";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function authRequiredResponse(req: NextRequest, errorCode: "auth_required" | "invalid_auth_code") {
+function authRequiredPayload(
+  req: NextRequest,
+  errorCode: "auth_required" | "invalid_auth_code"
+): TaskResponse {
   const authUrl = buildConnectorUrl(req);
   const error =
     errorCode === "auth_required"
       ? "Website authentication is required before creating a sandbox. Open Sandcastle Connect, sign in with GitHub, and paste the three-word connect code into SHGO."
       : "That three-word connect code is invalid, expired, or already used. Open Sandcastle Connect and try again.";
 
-  const response: TaskResponse = {
+  return {
     taskId: "",
     sandboxId: "",
     sandboxToken: "",
@@ -88,15 +87,19 @@ function authRequiredResponse(req: NextRequest, errorCode: "auth_required" | "in
     retryAfterMs: null,
     error,
   };
-
-  return Response.json(response, { status: 401 });
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const authError = validateAuth(req);
-    if (authError) {
-      return authError;
+    const expectedAgentKey = process.env.AGENT_API_KEY;
+    if (!expectedAgentKey) {
+      console.error("AGENT_API_KEY not set in environment");
+      return Response.json({ error: "Server misconfigured" }, { status: 500 });
+    }
+
+    const providedAgentKey = req.headers.get("X-Agent-Key");
+    if (!providedAgentKey || providedAgentKey !== expectedAgentKey) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     let body: {
@@ -138,7 +141,9 @@ export async function POST(req: NextRequest) {
     const promptText = typeof prompt === "string" ? prompt : "";
 
     if (!authCode || typeof authCode !== "string") {
-      return authRequiredResponse(req, "auth_required");
+      return Response.json(authRequiredPayload(req, "auth_required"), {
+        status: 401,
+      });
     }
 
     if (promptText.length > MAX_PROMPT_LENGTH) {
@@ -166,7 +171,12 @@ export async function POST(req: NextRequest) {
     try {
       assertSessionStartTokenConfiguration();
     } catch (error) {
-      return tokenConfigurationErrorResponse(error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Token signing is not configured correctly.";
+      console.error("Token signing misconfigured:", error);
+      return Response.json({ error: message }, { status: 500 });
     }
 
     try {
@@ -179,7 +189,9 @@ export async function POST(req: NextRequest) {
 
       const pairingPreview = await readPairingCode(authCode);
       if (!pairingPreview) {
-        return authRequiredResponse(req, "invalid_auth_code");
+        return Response.json(authRequiredPayload(req, "invalid_auth_code"), {
+          status: 401,
+        });
       }
 
       const template = await resolveLaunchableTemplateBySlug(
@@ -292,7 +304,9 @@ export async function POST(req: NextRequest) {
 
       const pairing = await redeemPairingCode(authCode);
       if (!pairing) {
-        return authRequiredResponse(req, "invalid_auth_code");
+        return Response.json(authRequiredPayload(req, "invalid_auth_code"), {
+          status: 401,
+        });
       }
 
       const response = await createOwnedSandboxTask(req, {
