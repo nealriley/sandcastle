@@ -73,12 +73,23 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ viewToken: string }> }
 ) {
-  const { viewToken } = await params;
+  let viewToken = "";
   let sandboxIdForFallback = "";
   let sessionKeyForFallback = "";
   let viewerUserId: string | null = null;
+  let recordForFallback: Awaited<ReturnType<typeof getOwnedSession>> | null = null;
 
   try {
+    const routeParams = await params;
+    viewToken =
+      typeof routeParams?.viewToken === "string" ? routeParams.viewToken : "";
+    if (!viewToken) {
+      return NextResponse.json(
+        { error: "Missing sandbox view token." },
+        { status: 400 }
+      );
+    }
+
     const user = await getWebsiteUser();
     viewerUserId = user?.id ?? null;
 
@@ -101,6 +112,7 @@ export async function GET(
     sandboxIdForFallback = viewData.sandboxId;
     sessionKeyForFallback = viewData.sessionKey;
     const record = await getOwnedSession(viewData.sessionKey);
+    recordForFallback = record;
     const access = evaluateSessionViewAccess({
       viewerUserId: user?.id ?? null,
       tokenOwnerUserId: viewData.ownerUserId,
@@ -218,9 +230,6 @@ export async function GET(
       error instanceof Error &&
       (error.message.includes("not found") || error.message.includes("ENOENT"))
     ) {
-      const record = sessionKeyForFallback
-        ? await getOwnedSession(sessionKeyForFallback).catch(() => null)
-        : null;
       logSessionDiagnostic({
         event: "view_route_sandbox_missing",
         level: "warn",
@@ -230,16 +239,16 @@ export async function GET(
           sessionKey: sessionKeyForFallback,
           viewerUserId,
           error: error.message,
-          record: summarizeOwnedSessionRecordForDiagnostics(record),
+          record: summarizeOwnedSessionRecordForDiagnostics(recordForFallback),
         },
       });
       return NextResponse.json(
         stoppedView(req, viewToken, sandboxIdForFallback, {
           sessionKey: sessionKeyForFallback,
-          templateSlug: record?.templateSlug ?? null,
-          templateName: record?.templateName ?? null,
-          executionStrategyKind: record?.executionStrategyKind ?? null,
-          envKeys: record?.envKeys ?? [],
+          templateSlug: recordForFallback?.templateSlug ?? null,
+          templateName: recordForFallback?.templateName ?? null,
+          executionStrategyKind: recordForFallback?.executionStrategyKind ?? null,
+          envKeys: recordForFallback?.envKeys ?? [],
         }),
         {
           headers: { "Cache-Control": "no-store" },
