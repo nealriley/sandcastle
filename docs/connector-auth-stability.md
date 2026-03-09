@@ -19,6 +19,12 @@ That invariant is correct in the codebase, but the connector auth surface is
 still too fragmented. The result is that bugs can show up as cross-connector
 visibility problems even when the underlying identity model is nominally shared.
 
+As of March 9, 2026, the latest production evidence is:
+
+- MCP to website handoff works
+- website access to MCP-created sandboxes works
+- SHGO is still the unstable connector path
+
 ## Current model
 
 ### Website
@@ -117,6 +123,17 @@ Pack auth model yet.
 - document the connector auth split explicitly
 - add a direct owner+sandbox lookup index instead of relying only on recent
   session scans
+- flatten several SHGO route handlers so the route owns the final response path
+
+### Latest conclusion
+
+The direct owner+sandbox index was the right fix, but it was not the full fix.
+
+The remaining SHGO failures point to two overlapping problems:
+
+- the pairing-code grant is still an awkward connector-specific auth model
+- the SHGO route family is still more sensitive to production-only App Router
+  behavior than the website or MCP paths
 
 ### Next practical checks
 
@@ -186,16 +203,24 @@ So the likely migration is not "reuse MCP OAuth as-is." It is:
 
 Short term:
 
-- stabilize the current pairing-code path with better indexing, smoke coverage,
-  and clearer ownership invariants
+- stop treating SHGO instability as incidental
+- add direct route tests and Pack-contract smoke coverage for SHGO create/list/resume
+- keep the direct owner+sandbox index
+- finish separating connector auth translation from connector-neutral sandbox services
 
 Medium term:
 
 - decide whether SHGO is strategic enough to justify a full OAuth migration
+- if SHGO remains strategic, stop relying on the three-word code as the only
+  real user-grant mechanism
 
 Long term:
 
 - if SHGO remains core, migrate from three-word pairing to Pack OAuth2 user auth
+
+For the full incident record and proposed execution order, see:
+
+- [`connector-stability-retrospective.md`](connector-stability-retrospective.md)
 
 ## External references
 

@@ -24,6 +24,15 @@ Last updated: March 9, 2026
 
 ## Current Priorities
 
+### Stability Pause
+
+- [ ] Stop adding new connector-facing features until SHGO create/list/resume are production-stable
+- [ ] Add route-level regression tests for `/api/sessions`, `/api/sandboxes`, and `/api/sandboxes/resume`
+- [ ] Add post-deploy canaries for the SHGO create/list/resume route family
+- [ ] Add a true MCP -> SHGO end-to-end smoke flow
+- [ ] Add a true SHGO -> MCP end-to-end smoke flow
+- [ ] Decide whether SHGO remains pairing-code based or moves toward Pack OAuth2 user auth
+
 ### Documentation and Audit
 
 - [x] Keep repo docs aligned with the current shipped product
@@ -38,13 +47,12 @@ Last updated: March 9, 2026
 - [ ] Expand route-level tests for provider fallback and launch validation
 - [ ] Expand smoke coverage for Codex, Website Deep Dive, and schema-driven launch fields
 - [ ] Add browser-level E2E coverage for dashboard, marketplace, environment, and session viewer flows
-- [ ] Add cross-connector smoke coverage: create via MCP, then access via SHGO
-- [ ] Add cross-connector smoke coverage: create via SHGO, then inspect via MCP
 
 ### Connector Auth Stabilization
 
-- [ ] Stop relying on recent-session scans for exact sandbox lookup
+- [x] Stop relying on recent-session scans for exact sandbox lookup
 - [ ] Make owned-sandbox listing limits explicit and configurable
+- [ ] Extract connector-neutral create/list/resume/continue services behind the auth layer
 - [ ] Decide whether SHGO should remain pairing-code based or move to Pack OAuth2 user auth
 
 ### Cleanup

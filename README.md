@@ -33,6 +33,8 @@ Sandcastle has two user-facing entry points:
    - resume a sandbox by id
    - continue work in the selected sandbox
    - read files, previews, logs, and status
+   - this is currently the least stable surface and should be treated as under
+     active stabilization, not as the most proven integration
 
 3. Remote MCP clients
    - connect to `/api/mcp` over Streamable HTTP
@@ -67,6 +69,7 @@ Current execution strategies:
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/route-handler-reliability.md`](docs/route-handler-reliability.md)
 - [`docs/connector-auth-stability.md`](docs/connector-auth-stability.md)
+- [`docs/connector-stability-retrospective.md`](docs/connector-stability-retrospective.md)
 - [`TASKS.md`](TASKS.md)
 
 ## Local Verification

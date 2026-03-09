@@ -221,3 +221,4 @@ For current operational guidance, also see:
 
 - [`route-handler-reliability.md`](route-handler-reliability.md)
 - [`connector-auth-stability.md`](connector-auth-stability.md)
+- [`connector-stability-retrospective.md`](connector-stability-retrospective.md)

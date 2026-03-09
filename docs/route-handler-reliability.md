@@ -17,6 +17,7 @@ This happened on:
 - website sandbox view routes
 - website stop/prompt routes
 - MCP OAuth metadata routes
+- SHGO create/list/resume routes
 
 The underlying lesson is simple: for critical routes, Sandcastle cannot rely on
 "helper returns a Response" abstractions or nested recovery paths that are only
@@ -118,6 +119,27 @@ Current guidance:
 - inline the final `NextResponse.json(...)` in the route handler for critical
   auth, metadata, and ownership routes
 
+### Auth helper response reuse in SHGO routes
+
+Broken pattern:
+
+- route handler called an auth helper that returned a `Response`
+- route handler then returned that helper response directly in early exits
+- the same route also used other response-producing helpers for pairing/auth
+  failures
+
+Observed result:
+
+- local tests and production smoke could pass
+- a real SHGO request path could still fail with `No response is returned from
+  route handler`
+
+Current guidance:
+
+- for auth-critical SHGO routes, prefer helper functions that return payloads
+  or domain errors, not `Response` objects
+- the route should convert those payloads into the final HTTP response itself
+
 ### Nested fallback chains in website session routes
 
 Broken pattern:
@@ -186,6 +208,14 @@ For website session-route changes, also verify:
 - one existing sandbox session page loads
 - one stop action succeeds
 - one follow-up prompt action succeeds or returns the expected non-500 error
+
+For SHGO route changes, also verify:
+
+- one Pack-compatible create request succeeds through `/api/sessions`
+- one owned-sandbox list succeeds through `/api/sandboxes`
+- one resume request succeeds through `/api/sandboxes/resume`
+- production logs show no fresh `No response is returned from route handler`
+  errors for those paths
 
 ## Current recommendation
 

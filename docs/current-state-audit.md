@@ -4,7 +4,7 @@ Date: March 9, 2026
 
 ## Summary
 
-The current repo implements a stable Sandcastle baseline with:
+The current repo implements a strong Sandcastle baseline with:
 
 - three user-facing surfaces: website, SHGO / Coda Pack, and remote MCP
 - four live built-in templates
@@ -13,9 +13,8 @@ The current repo implements a stable Sandcastle baseline with:
 - stored per-user environment variables
 - provider-key override and fallback behavior
 
-The main source of drift is no longer the runtime implementation. It is the
-surrounding documentation, Pack-facing vocabulary, and release-validation
-coverage.
+The main unresolved risk is no longer templates or execution strategies. It is
+connector stability, especially on the SHGO / Pack path.
 
 ## Current Functionality Inventory
 
@@ -55,6 +54,10 @@ Current Pack capabilities:
 - fetch preview URLs
 - fetch task/session status
 - stop a sandbox
+
+Operational note:
+
+- this remains the least reliable production surface today
 
 ### MCP
 
@@ -115,6 +118,8 @@ Current `wordcount` behavior:
   - website-owned sandbox resolution now returns typed JSON failures instead of throwing through route handlers
   - website `view`, `stop`, and `prompt` routes now keep param extraction and failure handling inside one guaranteed-response flow
   - regression tests now cover MCP metadata response generation and website-owned sandbox lookup failure paths
+  - added direct owner+sandbox indexing so exact connector lookup is no longer limited to only recent-session windows
+  - documented the current connector-stability incident and next-step recommendation in `docs/connector-stability-retrospective.md`
 
 ### Remaining gaps
 
@@ -124,8 +129,8 @@ Current `wordcount` behavior:
 - dormant references to retired built-ins still exist in historical assets and older planning context
 - SHGO and MCP still share ownership through website `user.id`, but they do not
   yet share one connector-grant model
-- SHGO owned-sandbox access has historically depended too much on recent-session
-  lookup windows instead of exact owner+sandbox indexing
+- SHGO remains the least stable connector even after ownership-index and route-shape hardening
+- several recent SHGO failures were production-only App Router `500`s rather than clean auth or ownership errors
 
 ## Current Confidence
 
@@ -135,17 +140,20 @@ Strengths:
   strategies, runners, session state, auth, tokens, and env validation
 - current template system is schema-driven rather than hardcoded per template
 - stopped/timed-out session handling has been hardened in both viewer and dashboard paths
+- MCP and website behavior are materially closer to stable than they were at the
+  start of this audit cycle
 
 Primary risk areas:
 
-- drift between repo docs and shipped behavior
-- Pack/runtime vocabulary drifting apart from middleware template truth
+- SHGO connector auth and route reliability
 - regressions in browser flows that do not yet have dedicated E2E coverage
+- lack of true cross-connector end-to-end smoke coverage
+- Pack/runtime vocabulary drifting apart from middleware template truth when connector behavior changes
 
 ## Recommended Next Work
 
-1. add coverage reporting and thresholds
-2. expand smoke coverage for the live template set
-3. add browser E2E coverage for the highest-value website flows
-4. remove or archive dead references to retired templates once rollout confidence is high
-5. stabilize cross-connector auth and decide whether SHGO should remain pairing-code based or move toward Pack OAuth
+1. pause new connector features and treat SHGO stability as the top engineering task
+2. add route-level tests and post-deploy canaries for `/api/sessions`, `/api/sandboxes`, and `/api/sandboxes/resume`
+3. add true cross-connector smoke coverage for MCP -> SHGO and SHGO -> MCP flows
+4. extract connector-neutral create/list/resume/continue services behind the auth layer
+5. decide whether SHGO should remain pairing-code based or move toward Pack OAuth
