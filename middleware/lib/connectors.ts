@@ -39,7 +39,7 @@ const CONNECTORS: ConnectorDefinition[] = [
     detailPath: "/connect/mcp",
     capabilities: [
       "List launchable templates",
-      "Launch and inspect owned sandboxes",
+      "Launch, continue, and inspect owned sandboxes",
       "Read previews, files, and task state",
       "Stop owned sandboxes from an MCP client",
     ],

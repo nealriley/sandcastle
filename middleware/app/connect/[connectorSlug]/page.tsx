@@ -231,7 +231,7 @@ async function McpConnectorDetail() {
             <div className="connect-instructions">
               <p>1. Add Sandcastle to a remote-MCP-capable client using the server URL above.</p>
               <p>2. When the client begins OAuth, sign in with GitHub and approve Sandcastle access.</p>
-              <p>3. After approval the client can list templates, launch sandboxes, inspect files and previews, and stop an owned sandbox.</p>
+              <p>3. After approval the client can list templates, launch sandboxes, continue active work, inspect files and previews, and stop an owned sandbox.</p>
             </div>
           </Panel>
 
@@ -306,6 +306,7 @@ async function McpConnectorDetail() {
             <ul className="connector-card__capabilities connector-card__capabilities--compact">
               <li>List templates and owned sandboxes</li>
               <li>Launch a sandbox from a template</li>
+              <li>Continue an active Claude or Codex sandbox with a new prompt</li>
               <li>Inspect tasks, files, logs, and previews</li>
               <li>Stop an owned sandbox</li>
             </ul>

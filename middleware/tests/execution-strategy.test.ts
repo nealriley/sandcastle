@@ -7,6 +7,7 @@ import {
   executionStrategyAllowsFollowUps,
   executionStrategyRequiredEnvironmentKeys,
   findMissingExecutionStrategyEnvironmentKeys,
+  followUpExecutionStrategy,
   executionStrategyRequiresAnthropicProxy,
   formatShellCommand,
 } from "../lib/execution-strategy";
@@ -97,4 +98,17 @@ test("applyExecutionStrategyEnvironmentDefaults falls back to platform provider 
     ),
     { OPENAI_API_KEY: "platform-openai" }
   );
+});
+
+test("followUpExecutionStrategy resolves agent strategies and rejects shell-command", () => {
+  assert.deepEqual(followUpExecutionStrategy("claude-agent"), {
+    kind: "claude-agent",
+  });
+  assert.deepEqual(followUpExecutionStrategy("codex-agent"), {
+    kind: "codex-agent",
+  });
+  assert.deepEqual(followUpExecutionStrategy(null), {
+    kind: "claude-agent",
+  });
+  assert.equal(followUpExecutionStrategy("shell-command"), null);
 });

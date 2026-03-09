@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
-import { getMcpOwnerFromAuth, getMcpSandboxView, launchMcpSandbox, listMcpSandboxes, listMcpTemplates, readMcpSandboxFile, stopMcpSandbox } from "@/lib/mcp-service";
+import { continueMcpSandbox, getMcpOwnerFromAuth, getMcpSandboxView, launchMcpSandbox, listMcpSandboxes, listMcpTemplates, readMcpSandboxFile, stopMcpSandbox } from "@/lib/mcp-service";
 import { verifyMcpAccessToken } from "@/lib/mcp-auth";
 import {
+  buildMcpFollowUpPresentation,
   buildMcpLaunchPresentation,
   buildMcpSandboxPresentation,
 } from "@/lib/mcp-presentation";
@@ -147,6 +148,33 @@ const mcpHandler = createMcpHandler(
           const request = getToolRequest(extra);
           const sandbox = await getMcpSandboxView(request, owner, sandboxId);
           const presentation = buildMcpSandboxPresentation(sandbox);
+          return jsonToolResult(presentation.payload, presentation.summary);
+        } catch (error) {
+          return toolError(error);
+        }
+      }
+    );
+
+    server.registerTool(
+      "sandcastle_continue_sandbox",
+      {
+        title: "Continue Sandcastle sandbox",
+        description:
+          "Queue a follow-up prompt for an active owned sandbox that supports follow-up work.",
+        inputSchema: {
+          sandboxId: z.string().min(1),
+          prompt: z.string().min(1),
+        },
+      },
+      async ({ sandboxId, prompt }, extra) => {
+        try {
+          const owner = getMcpOwnerFromAuth(extra);
+          const request = getToolRequest(extra);
+          const task = await continueMcpSandbox(request, owner, {
+            sandboxId,
+            prompt,
+          });
+          const presentation = buildMcpFollowUpPresentation(task);
           return jsonToolResult(presentation.payload, presentation.summary);
         } catch (error) {
           return toolError(error);

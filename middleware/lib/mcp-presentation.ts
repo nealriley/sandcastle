@@ -37,6 +37,30 @@ export function buildMcpLaunchPresentation(task: PresentedTask) {
   };
 }
 
+export function buildMcpFollowUpPresentation(task: PresentedTask) {
+  const followAlongUrl = fallbackUrl(task.sandboxUrl, "not available yet");
+  const previewUrl = fallbackUrl(task.previewUrl, "not ready yet");
+
+  return {
+    payload: {
+      task,
+      followAlongUrl: task.sandboxUrl,
+      previewUrl: task.previewUrl,
+      logsUrl: task.logsUrl,
+      sessionUrl: task.sessionUrl,
+      note:
+        "Use followAlongUrl for the Sandcastle website and sandcastle_get_sandbox to poll for updated status. sandboxId is an internal identifier, not a browser URL.",
+    },
+    summary: [
+      "Follow-up queued for the existing sandbox.",
+      `Sandcastle follow-along URL: ${followAlongUrl}`,
+      `Preview URL: ${previewUrl}`,
+      `Sandbox ID: ${task.sandboxId}`,
+      "Use sandcastle_get_sandbox to check task progress. Do not turn sandboxId into a browser URL.",
+    ].join("\n"),
+  };
+}
+
 export function buildMcpSandboxPresentation(sandbox: PresentedSandbox) {
   const followAlongUrl = fallbackUrl(sandbox.sandboxUrl, "not available yet");
   const previewUrl = fallbackUrl(sandbox.previewUrl, "not ready yet");

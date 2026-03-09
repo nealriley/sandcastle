@@ -11,11 +11,10 @@ import {
   isRateLimitError,
   rateLimitResponse,
 } from "@/lib/rate-limit";
-import { executionStrategyAllowsFollowUps } from "@/lib/execution-strategy";
+import { followUpExecutionStrategy } from "@/lib/execution-strategy";
 import { findOwnedSessionBySandboxId } from "@/lib/session-ownership";
 import { normalizePairingCode, readPairingCode } from "@/lib/pairing";
 import { restoreOwnedSandboxSession } from "@/lib/owned-sandbox";
-import type { ExecutionStrategy } from "@/lib/template-service-types";
 import { buildConnectorUrl } from "@/lib/url";
 import { startSandboxFollowUpTask } from "@/lib/sandbox-follow-up";
 import type { SessionOwnershipRecord, SessionToken, TaskResponse } from "@/lib/types";
@@ -147,14 +146,11 @@ export async function POST(req: NextRequest) {
         { status: 404 }
       );
     }
-    const followUpStrategy: ExecutionStrategy = {
-      kind:
-        record.executionStrategyKind === "codex-agent"
-          ? "codex-agent"
-          : "claude-agent",
-    };
+    const followUpStrategy = followUpExecutionStrategy(
+      record.executionStrategyKind ?? null
+    );
 
-    if (!executionStrategyAllowsFollowUps(record.executionStrategyKind ?? null)) {
+    if (!followUpStrategy) {
       return Response.json(
         { error: "This template does not accept follow-up prompts." },
         { status: 400 }

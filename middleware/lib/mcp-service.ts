@@ -1,13 +1,18 @@
 import { Sandbox } from "@vercel/sandbox";
 import {
   buildSessionView,
-  buildStoppedSessionResponse,
+  findCurrentTask,
+  reconcileSessionState,
 } from "./session-state";
-import { findMissingExecutionStrategyEnvironmentKeys } from "./execution-strategy";
+import {
+  findMissingExecutionStrategyEnvironmentKeys,
+  followUpExecutionStrategy,
+} from "./execution-strategy";
 import { listOwnedSessions, findOwnedSessionBySandboxId, touchOwnedSession } from "./session-ownership";
 import { restoreOwnedSandboxSession } from "./owned-sandbox";
 import { listLaunchableTemplateSummaries, resolveLaunchableTemplateBySlug } from "./template-service";
 import { normalizeSandboxEnvironment, type SandboxEnvironmentEntryInput } from "./sandbox-environment";
+import { startSandboxFollowUpTask } from "./sandbox-follow-up";
 import { listUserEnvironmentVariables } from "./user-environment";
 import { resolveTemplateEnvironment, resolveTemplatePrompt } from "./templates";
 import { MAX_PROMPT_LENGTH, VALID_RUNTIMES, createOwnedSandboxTask } from "./create-owned-sandbox";
@@ -254,6 +259,56 @@ export async function getMcpSandboxView(
   response.executionStrategyKind = record.executionStrategyKind ?? null;
   response.envKeys = record.envKeys ?? [];
   return response;
+}
+
+export async function continueMcpSandbox(
+  req: Request,
+  owner: McpOwner,
+  input: {
+    sandboxId: string;
+    prompt?: string;
+  }
+): Promise<TaskResponse> {
+  const sandboxId = input.sandboxId?.trim();
+  if (!sandboxId) {
+    throw new Error("sandboxId is required.");
+  }
+
+  const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+  if (!prompt) {
+    throw new Error("prompt is required.");
+  }
+
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    throw new Error(
+      `prompt exceeds maximum length of ${MAX_PROMPT_LENGTH} characters.`
+    );
+  }
+
+  const record = await findOwnedSessionBySandboxId(owner.userId, sandboxId);
+  if (!record) {
+    throw new Error(`No owned sandbox found for ${sandboxId}.`);
+  }
+
+  const strategy = followUpExecutionStrategy(record.executionStrategyKind ?? null);
+  if (!strategy) {
+    throw new Error("This template does not accept follow-up prompts.");
+  }
+
+  const session = await restoreOwnedSandboxSession(record);
+  if (!session || record.status === "stopped") {
+    throw new Error("Sandbox is no longer available.");
+  }
+
+  const sandbox = await Sandbox.get({ sandboxId: session.sandboxId });
+  const state = await reconcileSessionState(sandbox, session);
+  if (findCurrentTask(state)) {
+    throw new Error(
+      "This sandbox is already handling another task. Wait for it to finish, then retry the follow-up prompt."
+    );
+  }
+
+  return startSandboxFollowUpTask(req, session, prompt, strategy);
 }
 
 export async function readMcpSandboxFile(

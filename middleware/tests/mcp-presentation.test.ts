@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildMcpFollowUpPresentation,
   buildMcpLaunchPresentation,
   buildMcpSandboxPresentation,
 } from "../lib/mcp-presentation.js";
@@ -46,4 +47,26 @@ test("sandbox presentation promotes the Sandcastle follow-along URL", () => {
     /Sandcastle follow-along URL: https:\/\/sandcastle\.example\.com\/sandboxes\/view_456/
   );
   assert.match(presentation.summary, /Preview URL: not ready yet/);
+});
+
+test("follow-up presentation explains how to continue tracking the sandbox", () => {
+  const task = {
+    sandboxId: "sbx_789",
+    sandboxUrl: "https://sandcastle.example.com/sandboxes/view_789",
+    previewUrl: "https://sbx_789.vercel.run",
+    logsUrl: "https://sandcastle.example.com/sandboxes/view_789",
+    sessionUrl: "https://sandcastle.example.com/sandboxes/view_789",
+  };
+
+  const presentation = buildMcpFollowUpPresentation(task);
+
+  assert.equal(
+    presentation.payload.followAlongUrl,
+    "https://sandcastle.example.com/sandboxes/view_789"
+  );
+  assert.match(presentation.summary, /Follow-up queued/);
+  assert.match(
+    presentation.summary,
+    /Use sandcastle_get_sandbox to check task progress/
+  );
 });

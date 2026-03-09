@@ -65,6 +65,7 @@ Current MCP capabilities:
 - browser-based GitHub-backed OAuth approval
 - list templates
 - launch an owned sandbox
+- continue an active Claude or Codex sandbox
 - list owned sandboxes
 - inspect sandbox state, previews, tasks, and logs
 - read sandbox files

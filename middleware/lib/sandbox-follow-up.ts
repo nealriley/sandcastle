@@ -16,7 +16,7 @@ import type { ExecutionStrategy } from "./template-service-types";
 import type { SessionToken, TaskResponse } from "./types.js";
 
 export async function startSandboxFollowUpTask(
-  req: NextRequest,
+  req: Request | NextRequest,
   session: SessionToken,
   prompt: string,
   executionStrategy: ExecutionStrategy = { kind: "claude-agent" }

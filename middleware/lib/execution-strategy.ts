@@ -1,6 +1,10 @@
 import type { ExecutionStrategy } from "./template-service-types.js";
 
 export type ExecutionStrategyKind = ExecutionStrategy["kind"];
+export type FollowUpExecutionStrategy = Extract<
+  ExecutionStrategy,
+  { kind: "claude-agent" | "codex-agent" }
+>;
 
 function normalizeExecutionStrategyKind(
   input: ExecutionStrategy | ExecutionStrategyKind | null | undefined
@@ -55,6 +59,21 @@ export function executionStrategyAllowsFollowUps(
   input: ExecutionStrategy | ExecutionStrategyKind | null | undefined
 ): boolean {
   return normalizeExecutionStrategyKind(input) !== "shell-command";
+}
+
+export function followUpExecutionStrategy(
+  input: ExecutionStrategy | ExecutionStrategyKind | null | undefined
+): FollowUpExecutionStrategy | null {
+  const kind = normalizeExecutionStrategyKind(input);
+  if (kind === "shell-command") {
+    return null;
+  }
+
+  if (kind === "codex-agent") {
+    return { kind: "codex-agent" };
+  }
+
+  return { kind: "claude-agent" };
 }
 
 export function executionStrategyRequiresAnthropicProxy(

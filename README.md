@@ -38,7 +38,8 @@ Sandcastle has two user-facing entry points:
    - connect to `/api/mcp` over Streamable HTTP
    - discover auth metadata from the standard well-known routes
    - authorize with GitHub-backed OAuth in the browser
-   - list templates, launch sandboxes, inspect owned sandboxes, read files, and stop sandboxes
+   - list templates, launch sandboxes, continue active Claude/Codex sandboxes,
+     inspect owned sandboxes, read files, and stop sandboxes
    - use `/connect/mcp` for client-specific setup instructions for Claude Code,
      Claude web, Codex, and ChatGPT
 

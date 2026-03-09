@@ -65,7 +65,7 @@ Current MCP surface:
 - protected-resource metadata at `/.well-known/oauth-protected-resource/api/mcp`
 - authorization server metadata at `/.well-known/oauth-authorization-server/api/mcp/oauth`
 - owner-scoped tools for template discovery, sandbox launch, sandbox listing,
-  sandbox inspection, file reads, and stopping sandboxes
+  sandbox continuation, sandbox inspection, file reads, and stopping sandboxes
 
 ## Middleware Responsibilities
 
