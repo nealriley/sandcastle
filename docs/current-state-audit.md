@@ -1,6 +1,6 @@
 # Sandcastle Current-State Audit
 
-Date: March 8, 2026
+Date: March 9, 2026
 
 ## Summary
 
@@ -110,6 +110,11 @@ Current `wordcount` behavior:
 - release workflow is now documented for both middleware and Pack surfaces
 - connector management is now a generalized product surface
 - remote MCP discovery, auth, and owner-scoped tools are now implemented
+- March 9 reliability audit:
+  - MCP auth discovery no longer depends on rewrites for the well-known metadata URLs
+  - website-owned sandbox resolution now returns typed JSON failures instead of throwing through route handlers
+  - website `view`, `stop`, and `prompt` routes now keep param extraction and failure handling inside one guaranteed-response flow
+  - regression tests now cover MCP metadata response generation and website-owned sandbox lookup failure paths
 
 ### Remaining gaps
 

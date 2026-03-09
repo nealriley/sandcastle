@@ -10,18 +10,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: projectRoot,
   },
-  async rewrites() {
-    return [
-      {
-        source: "/.well-known/oauth-authorization-server/api/mcp/oauth",
-        destination: "/api/mcp/oauth/metadata",
-      },
-      {
-        source: "/.well-known/openid-configuration/api/mcp/oauth",
-        destination: "/api/mcp/oauth/metadata",
-      },
-    ];
-  },
 };
 
 export default nextConfig;

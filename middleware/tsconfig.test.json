@@ -11,8 +11,12 @@
   },
   "include": [
     "lib/anthropic-proxy.ts",
+    "lib/mcp-auth.ts",
+    "lib/mcp-oauth-metadata.ts",
     "lib/tokens.ts",
     "lib/types.ts",
+    "lib/url.ts",
+    "lib/website-owned-sandbox.ts",
     "tests/**/*.test.ts"
   ],
   "exclude": [
